@@ -19,19 +19,21 @@ Controls: **WASD / arrows** move · **Space** wait · **Enter / E** edit the wor
 ## How words become mechanics
 
 1. `LocalWordInterpreter`: dictionary + stemming (`protect` → HELP, `sleeping` → SLEEP).
-2. `LLMWordInterpreter` (optional): only for words the dictionary doesn't know. OpenAI structured output is
-   constrained to the level's allowed tokens (or NONE) and re-validated. It never generates code, and any failure
-   falls back to "the world doesn't understand".
+2. AI interpreter (optional): only for words the dictionary doesn't know. **Gemini** (`GeminiWordInterpreter`,
+   `responseSchema`) when a Gemini key is set, otherwise **OpenAI** (`OpenAIWordInterpreter`, `json_schema`).
+   Output is constrained to the level's allowed tokens (or NONE) and re-validated. It never generates code, and any
+   failure falls back to "the world doesn't understand".
 
 The game is fully playable without AI.
 
-### OpenAI key
+### AI keys
 
-- **Dev:** put `VITE_OPENAI_API_KEY=...` in `.env.local` (gitignored). It is only read in dev mode and is **not**
-  included in `npm run build` output.
-- **Deployed build:** click "AI interpreter: OFF" on the title screen to paste a key. It stays in that browser's
-  localStorage. (For a public demo, a small proxy server is the safer option.)
-- Model: `VITE_OPENAI_MODEL` (default `gpt-4.1-mini`).
+- **Dev:** `cp .env.example .env.local` and set `VITE_GEMINI_API_KEY` ([Google AI Studio](https://aistudio.google.com/apikey))
+  and/or `VITE_OPENAI_API_KEY`. `.env.local` is gitignored and only read in dev mode. `npm run build` never includes
+  it (`tools/check-no-keys.mjs` fails the build if a key shows up in `dist/`).
+- **Deployed build:** click "AI interpreter: OFF" on the title screen and paste either key (OpenAI keys start with
+  `sk-`). It stays in that browser's localStorage. (For a public demo, a small proxy server is the safer option.)
+- Models: `VITE_GEMINI_MODEL` (default `gemini-3.8-flash`), `VITE_OPENAI_MODEL` (default `gpt-4.1-mini`).
 
 ## Levels
 
@@ -42,8 +44,41 @@ The game is fully playable without AI.
 | 3 | GUARD **CHASES** YOU (+ plate & door) | HELP, FOLLOW |
 | 4 | GUARD CHASES **YOU** | KEY |
 | 5 | GUARD **CHASES** YOU · YOU DIE ON RED | HELP, FLEE, FOLLOW |
+| 6 | GUARD **CHASES** YOU · **YOU** DIE ON RED | timed: lure the guard onto red, then YOU → GUARD |
+| 7 | GUARD **CHASES** YOU · **EVERYONE** DIES ON RED · YOU **FREEZE** ON BLUE | timed: EVERYONE → YOU, then CHASES → HELPS |
+| 8 | YOU **DIE** ON RED · GUARD **CHASES** YOU (`maxChanges: 2`) | HIDE + HELP, HEAL + HELP, BOUNCE + HELP |
 
-`npm test` checks this table against every allowed word by exhaustive search.
+**The ONE WORD rule:** a level may have several editable words, but only one may differ from the original
+sentences at a time. Rewriting another word restores the first. A level can raise this with `maxChanges`
+(level 8 allows two).
+
+**Timed levels** (`timed: true`): rewrites take effect instantly (a guard standing on a tile that just became
+deadly dies), so *when* you change a word matters. For these levels `npm test` checks that no word typed at the
+start works, and that a solution rewriting words mid-level exists.
+
+`npm test` checks this table by exhaustive search over every allowed word (within `maxChanges`).
+
+### Add your own
+
+One file = one level, in `src/levels/definitions/`, named `NN-slug.ts`. Drop a new file in and it
+appears in the game and in the test run — there is no list to register it in.
+
+**With the editor (easiest):** `npm run dev`, then **MAKE A LEVEL** on the title screen (or
+<http://localhost:5173/editor.html>). Paint the map, tick the words players may change (one or
+several), hit **TEST LEVEL** (it brute-forces every combination and fills in `solutions`), then
+**SAVE TO definitions/** — the dev server writes the file and the game reloads with your level.
+On a deployed static build the same button downloads the `.ts` file to drop into the folder (and
+send as a pull request).
+
+**By hand:**
+
+```bash
+cp src/levels/definitions/01-red.ts src/levels/definitions/07-my-level.ts
+npm run dev
+npm test
+```
+
+See `src/levels/definitions/README.md` for the level format, the map legend and the rule vocabulary.
 
 ## Sound
 
@@ -61,7 +96,10 @@ the choice is remembered in localStorage.
 
 - `src/systems/World.ts`: deterministic turn-based simulation (no Phaser), rules → behavior
 - `src/rules/`: rule types, sentence rendering, interpreters, `RuleManager`
-- `src/levels/levels.ts`: ASCII level maps
+- `src/levels/definitions/`: one file per level (auto-discovered, ordered by file number)
+- `src/levels/levels.ts`: level discovery; `defineLevel.ts` / `registry.ts`: level format and loading
+- `src/systems/Solver.ts`: brute-force solver, used by `npm test` and the editor's TEST LEVEL
+- `src/editor/` + `editor.html`: visual level editor; `tools/levelWriterPlugin.ts` writes the file in dev
 - `src/scenes/`: Phaser menu + game rendering
 - `src/ui/`: DOM rule editor, level-complete card, `Audio.ts` (music beds, stings, samples) and `Sfx.ts`
 - `tools/audio/`: the generation scripts for everything in `public/audio/`
