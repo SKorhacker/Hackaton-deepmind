@@ -1,98 +1,228 @@
 import Phaser from 'phaser';
-import { COLORS, OPENAI_MODEL, openAIKey, setOpenAIKey } from '../config/GameConfig';
+import { VIEW_W, VIEW_H, RENDER_SCALE } from '../config/Display';
 import { LEVELS } from '../levels/levels';
 import { session } from '../config/Session';
+import { openAIKey, setOpenAIKey } from '../config/GameConfig';
+import { character, createCharacterAnimations, loadCharacters, OUTFITS, pose, reducedMotion, type Outfit } from '../config/Character';
 
-const FONT = '"Space Mono", monospace';
+const MONO = '"Space Mono", monospace';
+const SERIF = '"Cormorant Garamond", Georgia, serif';
 
 export class MenuScene extends Phaser.Scene {
+  private turning = false;
+  private modal = false;
+  private outfitViews: { id: Outfit; sprite: Phaser.GameObjects.Sprite; border: Phaser.GameObjects.Rectangle; label: Phaser.GameObjects.Text }[] = [];
+  private outfitNote?: Phaser.GameObjects.Text;
+  private travelerName!: Phaser.GameObjects.Text;
+  private wardrobeOpen = false;
   constructor() { super('menu'); }
 
-  create() {
-    document.body.classList.add('in-menu');
-    const { width: W, height: H } = this.scale;
-    this.drawBackdrop(W, H);
-
-    const title = this.add.text(W / 2, H * 0.28, 'ONE WORD', { fontFamily: FONT, fontSize: '84px', fontStyle: 'bold', color: '#ece8f5' }).setOrigin(0.5);
-    // Every few seconds the world briefly misreads its own title.
-    this.time.addEvent({
-      delay: 2600, loop: true, callback: () => {
-        title.setText('ONE WORLD').setColor('#ffd166');
-        this.cameras.main.shake(80, 0.002);
-        this.time.delayedCall(260, () => title.setText('ONE WORD').setColor('#ece8f5'));
-      },
-    });
-    this.add.text(W / 2, H * 0.28 + 72, 'Change one word.\nChange the world.', { fontFamily: FONT, fontSize: '20px', color: '#8a85a0', align: 'center', lineSpacing: 6 }).setOrigin(0.5);
-
-    this.button(W / 2, H * 0.62, 'PLAY', true, () => this.start(0));
-    this.button(W / 2, H * 0.62 + 62, 'HOW TO PLAY', false, () => this.howTo());
-
-    // Level select (handy for demos).
-    const lx = W / 2 - ((LEVELS.length - 1) * 44) / 2;
-    LEVELS.forEach((l, i) => {
-      const solved = session.best.has(l.id);
-      const t = this.add.text(lx + i * 44, H - 64, String(l.id), {
-        fontFamily: FONT, fontSize: '16px', color: solved ? '#5ee6a0' : '#5d5873',
-        backgroundColor: '#1d1a29', padding: { x: 10, y: 4 },
-      }).setOrigin(0.5).setInteractive({ useHandCursor: true });
-      t.on('pointerover', () => t.setColor('#ffd166'));
-      t.on('pointerout', () => t.setColor(solved ? '#5ee6a0' : '#5d5873'));
-      t.on('pointerdown', () => this.start(i));
-    });
-    this.add.text(W / 2, H - 94, 'LEVELS', { fontFamily: FONT, fontSize: '11px', color: '#5d5873' }).setOrigin(0.5);
-
-    const ai = this.add.text(W - 14, H - 12, '', { fontFamily: FONT, fontSize: '11px', color: '#5d5873' }).setOrigin(1, 1).setInteractive({ useHandCursor: true });
-    const refreshAi = () => ai.setText(openAIKey() ? `AI interpreter: ON (${OPENAI_MODEL})` : 'AI interpreter: OFF · click to add an OpenAI key');
-    refreshAi();
-    ai.on('pointerdown', () => {
-      const k = window.prompt('OpenAI API key (stored only in this browser). Leave empty to turn AI off.', '');
-      if (k !== null) { setOpenAIKey(k.trim()); refreshAi(); }
-    });
-
-    this.input.keyboard?.on('keydown-ENTER', () => this.start(0));
-    this.input.keyboard?.on('keydown-SPACE', () => this.start(0));
-  }
-
-  private start(levelIndex: number) {
-    this.scene.start('game', { levelIndex });
-  }
-
-  private drawBackdrop(W: number, H: number) {
-    // Drifting tiles: a quiet hint of the puzzle grid.
-    const colors = [COLORS.red, COLORS.blue, COLORS.plate, COLORS.exit, COLORS.door];
-    for (let i = 0; i < 26; i++) {
-      const s = Phaser.Math.Between(14, 34);
-      const r = this.add.rectangle(Phaser.Math.Between(0, W), Phaser.Math.Between(0, H), s, s, Phaser.Utils.Array.GetRandom(colors), 0.08).setAngle(Phaser.Math.Between(0, 45));
-      this.tweens.add({ targets: r, y: r.y - Phaser.Math.Between(20, 60), angle: r.angle + 20, duration: Phaser.Math.Between(4000, 9000), yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+  preload() {
+    this.load.image('manuscript', `${import.meta.env.BASE_URL}art/manuscript-menu.jpg`);
+    loadCharacters(this);
+    for (const name of ['guard', 'door', 'key', 'plate', 'exit']) {
+      if (!this.textures.exists(`painted-${name}`)) this.load.image(`painted-${name}`, `${import.meta.env.BASE_URL}art/runtime/${name}.png`);
     }
   }
 
-  private button(x: number, y: number, label: string, primary: boolean, onClick: () => void) {
-    const bg = this.add.rectangle(x, y, 240, 48, primary ? 0xffd166 : 0x1d1a29).setStrokeStyle(2, primary ? 0xffd166 : 0x34304a).setInteractive({ useHandCursor: true });
-    const t = this.add.text(x, y, label, { fontFamily: FONT, fontSize: '18px', fontStyle: 'bold', color: primary ? '#1a1400' : '#ece8f5' }).setOrigin(0.5);
-    bg.on('pointerover', () => { bg.setScale(1.04); t.setScale(1.04); });
-    bg.on('pointerout', () => { bg.setScale(1); t.setScale(1); });
+  create() {
+    this.scale.setGameSize(VIEW_W * RENDER_SCALE, VIEW_H * RENDER_SCALE);
+    this.cameras.main.setZoom(RENDER_SCALE).centerOn(VIEW_W / 2, VIEW_H / 2);
+    this.cameras.main.resetFX();
+    this.turning = false; this.modal = false; this.outfitViews = [];
+    document.body.classList.add('in-menu');
+    // The HUD changes the parent size; refresh its bounds before mapping pointer input.
+    this.scale.getParentBounds();
+    this.scale.refresh();
+    createCharacterAnimations(this);
+    const W = VIEW_W, H = VIEW_H;
+    this.wardrobeOpen = false; this.outfitNote = undefined;
+    this.add.image(W / 2, H / 2, 'manuscript').setDisplaySize(W, H);
+    this.add.rectangle(W / 2, H / 2, W, H, 0x07131b, 0.23);
+    this.add.rectangle(W / 2, H / 2, W - 34, H - 34).setStrokeStyle(1, 0xd6b575, 0.35);
+    this.label(40, 43, 'OW /', 24, SERIF, '#eadabd').setOrigin(0, 0.5);
+    this.button(820, 43, 'CHOOSE TRAVELER', 190, () => this.wardrobe(), false).setName('choose-traveler');
+    this.travelerName = this.label(820, 70, '', 9, MONO, '#d6b575');
+    this.label(W / 2, 112, 'THE LIVING MANUSCRIPT', 10, MONO, '#d6b575').setLetterSpacing(4);
+    const title = this.label(W / 2, 171, 'ONE WORD', 90, SERIF, '#f7edd8').setName('menu-title');
+    if (title.width > 535) title.setScale(535 / title.width);
+    title.setShadow(0, 4, '#07131b', 12, true, true);
+    this.label(W / 2, 239, 'Change one word. Change the world.', 23, SERIF, '#e1d6bd').setFontStyle('italic');
+    this.label(W / 2, 278, `${LEVELS.length} chapters. One extraordinary power.`, 10, MONO, '#b4bebd');
+    this.button(W / 2, 334, 'BEGIN THE STORY  →', 252, () => this.start(0), true).setName('begin-story');
+    this.button(W / 2, 384, 'HOW TO PLAY', 252, () => this.howTo(), false).setName('how-to-play');
+    this.label(W / 2, 433, 'CHAPTERS', 9, MONO, '#c5baa4').setLetterSpacing(3);
+    LEVELS.forEach((level, i) => {
+      const x = W / 2 + (i - (LEVELS.length - 1) / 2) * Math.min(42, 750 / LEVELS.length);
+      const solved = session.best.has(level.id);
+      const row = this.add.rectangle(x, 465, 32, 30, 0x10232c, 0.85).setStrokeStyle(1, solved ? 0x8fcbb3 : 0x72674f, 0.8).setInteractive({ useHandCursor: true }).setName(`chapter-${i + 1}`);
+      this.label(x, 465, ['I', 'II', 'III', 'IV', 'V', 'VI'][i] ?? String(level.id), 18, SERIF, solved ? '#8fcbb3' : '#eadabd');
+      row.on('pointerover', () => row.setFillStyle(0x68583a));
+      row.on('pointerout', () => row.setFillStyle(0x10232c, 0.85));
+      row.on('pointerdown', () => this.start(i));
+    });
+    this.label(40, H - 33, 'MAKE A LEVEL ↗', 10, MONO, '#d6b575').setOrigin(0, 0.5).setInteractive({ useHandCursor: true }).on('pointerdown', () => { window.location.href = `${import.meta.env.BASE_URL}editor.html`; });
+    this.label(W - 40, H - 33, 'PRESS ENTER TO BEGIN', 8, MONO, '#d6b575').setOrigin(1, 0.5);
+    this.refreshOutfit();
+    document.getElementById('game')!.style.backgroundImage = `linear-gradient(#07131b55, #07131bc9), url("${import.meta.env.BASE_URL}art/manuscript-menu.jpg")`;
+    this.createMobileMenu();
+    this.ambient();
+    const requested = Number(new URLSearchParams(window.location.search).get('level'));
+    const levelIndex = LEVELS.findIndex(level => level.id === requested);
+    if (levelIndex >= 0) {
+      const url = new URL(window.location.href); url.searchParams.delete('level'); history.replaceState(null, '', url);
+      this.time.delayedCall(0, () => this.start(levelIndex));
+    }
+    this.input.keyboard?.on('keydown-ENTER', () => this.start(0));
+    this.input.keyboard?.on('keydown-SPACE', () => this.start(0));
+    this.input.keyboard?.on('keydown-LEFT', () => this.cycle(-1));
+    this.input.keyboard?.on('keydown-RIGHT', () => this.cycle(1));
+    for (let i = 1; i <= Math.min(LEVELS.length, 9); i++) this.input.keyboard?.on(`keydown-${i}`, () => this.start(i - 1));
+  }
+
+  private createMobileMenu() {
+    const root = document.getElementById('mobile-menu')!;
+    root.replaceChildren();
+    const text = (tag: string, value: string, className = '') => {
+      const node = document.createElement(tag); node.textContent = value; node.className = className; root.append(node); return node;
+    };
+    text('p', 'THE LIVING MANUSCRIPT', 'mobile-eyebrow');
+    text('h1', 'ONE WORD');
+    text('p', 'Change one word. Change the world.', 'mobile-subtitle');
+    const begin = text('button', 'BEGIN THE STORY →') as HTMLButtonElement;
+    begin.id = 'mobile-begin'; begin.onclick = () => this.start(0);
+    const chapters = text('div', '', 'mobile-chapters');
+    LEVELS.forEach((level, i) => {
+      const button = document.createElement('button'); button.className = 'ghost';
+      button.textContent = String(level.id); button.setAttribute('aria-label', `Chapter ${level.id}: ${level.name}`);
+      button.onclick = () => this.start(i); chapters.append(button);
+    });
+    text('p', 'YOUR TRAVELER', 'mobile-eyebrow');
+    const outfits = text('div', '', 'mobile-outfits');
+    OUTFITS.forEach(outfit => {
+      const button = document.createElement('button'); button.className = 'ghost';
+      const portrait = document.createElement('span'); portrait.className = 'mobile-portrait';
+      portrait.style.backgroundImage = `url("${import.meta.env.BASE_URL}art/runtime/${outfit.id}-walk.png")`;
+      const label = document.createElement('span'); label.textContent = outfit.name;
+      button.append(portrait, label); button.setAttribute('aria-pressed', String(character.outfit === outfit.id));
+      button.onclick = () => {
+        this.select(outfit.id);
+        outfits.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b === button)));
+      };
+      outfits.append(button);
+    });
+    const how = document.createElement('details');
+    const summary = document.createElement('summary'); summary.textContent = 'How to play';
+    const help = document.createElement('p'); help.textContent = 'Tap a golden word to rewrite a rule. Swipe, tap a tile, or use the arrow pad to move. Reach the jade exit. Tap the center dot to wait.';
+    how.append(summary, help); root.append(how);
+    const maker = document.createElement('a'); maker.href = `${import.meta.env.BASE_URL}editor.html`; maker.textContent = 'Open the level maker'; root.append(maker);
+  }
+
+  private label(x: number, y: number, text: string, size: number, font: string, color: string) {
+    return this.add.text(x, y, text, { resolution: RENDER_SCALE, fontFamily: font, fontSize: `${size}px`, color, align: 'center' }).setOrigin(0.5);
+  }
+
+  private select(outfit: Outfit) {
+    if (this.turning || (this.modal && !this.wardrobeOpen)) return;
+    character.select(outfit); this.refreshOutfit();
+  }
+
+  private cycle(step: number) {
+    const index = OUTFITS.findIndex(outfit => outfit.id === character.outfit);
+    this.select(OUTFITS[(index + step + OUTFITS.length) % OUTFITS.length].id);
+  }
+
+  private refreshOutfit() {
+    this.travelerName?.setText(OUTFITS.find(outfit => outfit.id === character.outfit)!.name.toUpperCase());
+    for (const view of this.outfitViews) {
+      const selected = view.id === character.outfit;
+      view.border.setStrokeStyle(selected ? 2 : 1, selected ? 0xa36d35 : 0x987747, selected ? 0.9 : 0.25).setFillStyle(0xccaa69, selected ? 0.2 : 0.04);
+      view.label.setColor(selected ? '#713f24' : '#765c3d');
+      view.sprite.setAlpha(selected ? 1 : 0.7);
+      if (selected) pose(view.sprite, view.id, 'down', 'idle');
+      else view.sprite.stop().setFrame(0);
+    }
+    this.outfitNote?.setText(OUTFITS.find(outfit => outfit.id === character.outfit)!.detail);
+  }
+
+  private wardrobe() {
+    if (this.modal || this.turning) return;
+    this.modal = true; this.wardrobeOpen = true;
+    const layer = this.add.container(0, 0).setDepth(15).setName('wardrobe');
+    const shade = this.add.rectangle(480, 270, 960, 540, 0x07131b, 0.88).setInteractive();
+    const panel = this.add.rectangle(480, 270, 550, 370, 0xefdfbd).setStrokeStyle(2, 0xb69358);
+    layer.add([shade, panel, this.label(480, 124, 'Choose your traveler', 36, SERIF, '#3b3028'),
+      this.label(480, 157, 'THREE STORIES. THE SAME EXTRAORDINARY POWER.', 9, MONO, '#795c37')]);
+    OUTFITS.forEach((outfit, i) => {
+      const x = 328 + i * 152;
+      const border = this.add.rectangle(x, 260, 128, 155, 0xccaa69, 0.1).setStrokeStyle(1, 0x987747, 0.3).setInteractive({ useHandCursor: true }).setName(`outfit-${outfit.id}`);
+      const sprite = this.add.sprite(x, 248, `hero-${outfit.id}`, 0).setDisplaySize(136, 136);
+      const label = this.label(x, 322, outfit.name, 11, MONO, '#765c3d');
+      this.outfitViews.push({ id: outfit.id, border, sprite, label });
+      layer.add([border, sprite, label]);
+      border.on('pointerdown', () => this.select(outfit.id));
+    });
+    this.outfitNote = this.label(480, 363, '', 17, SERIF, '#745a40').setFontStyle('italic');
+    const done = this.add.rectangle(480, 409, 204, 34, 0x344c49).setInteractive({ useHandCursor: true }).setName('wardrobe-done');
+    layer.add([this.outfitNote, done, this.label(480, 409, 'KEEP THIS TRAVELER', 10, MONO, '#f0e6cd')]);
+    const close = () => {
+      this.input.keyboard?.off('keydown-ESC', close);
+      this.modal = false; this.wardrobeOpen = false; this.outfitViews = []; this.outfitNote = undefined;
+      layer.destroy();
+    };
+    done.on('pointerdown', close); shade.on('pointerdown', close);
+    this.input.keyboard?.once('keydown-ESC', close);
+    this.refreshOutfit();
+  }
+
+  private ambient() {
+    if (reducedMotion()) return;
+    // Candlelight and loose-paper details stay outside the interactive page content.
+    const glow = this.add.ellipse(69, 79, 190, 225, 0xffd389, 0.09);
+    this.tweens.add({ targets: glow, alpha: 0.18, duration: 1750, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+    for (let i = 0; i < 12; i++) {
+      const mote = this.add.circle(70 + i * 73, 40 + (i * 47) % 460, i % 3 === 0 ? 1.4 : 0.8, 0xffe2a2, 0.35);
+      this.tweens.add({ targets: mote, y: mote.y - 18, alpha: 0.05, duration: 2800 + i * 170, yoyo: true, repeat: -1 });
+    }
+  }
+
+  private start(levelIndex: number) {
+    if (this.turning || this.modal) return;
+    this.turning = true;
+    if (reducedMotion()) { this.scene.start('game', { levelIndex }); return; }
+    this.cameras.main.fadeOut(260, 13, 26, 32);
+    this.time.delayedCall(270, () => this.scene.start('game', { levelIndex }));
+  }
+
+  private button(x: number, y: number, text: string, width: number, onClick: () => void, primary: boolean) {
+    const bg = this.add.rectangle(x, y, width, 39, primary ? 0xd6b575 : 0x0d2029, primary ? 1 : 0.8).setStrokeStyle(1, 0xd6b575, 0.7).setInteractive({ useHandCursor: true });
+    this.label(x, y, text, 9, MONO, primary ? '#14212a' : '#eadabd').setLetterSpacing(1);
+    bg.on('pointerover', () => bg.setAlpha(0.8));
+    bg.on('pointerout', () => bg.setAlpha(1));
     bg.on('pointerdown', onClick);
     return bg;
   }
 
   private howTo() {
-    const { width: W, height: H } = this.scale;
+    if (this.modal || this.turning) return;
+    this.modal = true;
+    const W = VIEW_W, H = VIEW_H;
     const layer = this.add.container(0, 0).setDepth(10);
-    const shade = this.add.rectangle(W / 2, H / 2, W, H, 0x0a0810, 0.85).setInteractive();
-    const panel = this.add.rectangle(W / 2, H / 2, 520, 330, 0x1d1a29).setStrokeStyle(1, 0x34304a);
-    const body = this.add.text(W / 2, H / 2 - 30, [
-      'Each level has one rule.',
-      '',
-      'Change exactly one word.',
-      '',
-      'The world will obey the new sentence.',
-      '',
-      'Reach the exit.',
-    ].join('\n'), { fontFamily: FONT, fontSize: '19px', color: '#ece8f5', align: 'center' }).setOrigin(0.5);
-    const example = this.add.text(W / 2, H / 2 + 100, 'YOU DIE ON RED  →  YOU HIDE ON RED', { fontFamily: FONT, fontSize: '14px', color: '#ffd166' }).setOrigin(0.5);
-    const close = this.add.text(W / 2, H / 2 + 140, 'click anywhere', { fontFamily: FONT, fontSize: '12px', color: '#5d5873' }).setOrigin(0.5);
-    layer.add([shade, panel, body, example, close]);
-    shade.on('pointerdown', () => layer.destroy());
+    const shade = this.add.rectangle(W / 2, H / 2, W, H, 0x07131b, 0.93).setInteractive();
+    const panel = this.add.rectangle(W / 2, H / 2, 570, 370, 0x142630).setStrokeStyle(1, 0xd6b575, 0.6);
+    const title = this.add.text(W / 2, 133, 'The world obeys your words.', { resolution: RENDER_SCALE, fontFamily: SERIF, fontSize: '34px', color: '#f0e6cd' }).setOrigin(0.5);
+    const body = this.add.text(W / 2, 252, 'Each chapter has rules.\nChoose a golden word and write a replacement.\nReach the jade exit.\n\nARROWS / WASD · move     SPACE · wait\nENTER / E · rewrite     R · restart', { resolution: RENDER_SCALE, fontFamily: MONO, fontSize: '13px', color: '#c2c8c1', align: 'center', lineSpacing: 12 }).setOrigin(0.5);
+    const example = this.add.text(W / 2, 354, 'YOU DIE ON RED  →  YOU HIDE ON RED', { resolution: RENDER_SCALE, fontFamily: MONO, fontSize: '14px', color: '#d6b575' }).setOrigin(0.5);
+    const close = this.add.text(W / 2, 412, 'CLICK ANYWHERE TO CLOSE', { resolution: RENDER_SCALE, fontFamily: MONO, fontSize: '10px', color: '#9da99f' }).setOrigin(0.5);
+    const ai = this.add.text(W / 2, 385, '', { resolution: RENDER_SCALE, fontFamily: MONO, fontSize: '9px', color: '#b4bebd' }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+    const refresh = () => ai.setText(`WORD INTERPRETER: ${openAIKey() ? 'AI' : 'LOCAL'} · CONFIGURE`);
+    refresh();
+    ai.on('pointerdown', () => {
+      const key = window.prompt('Optional OpenAI key for unfamiliar words. Stored only in this browser. Leave empty to use the local dictionary.', '');
+      if (key !== null) { setOpenAIKey(key.trim()); refresh(); }
+    });
+    layer.add([shade, panel, title, body, example, ai, close]);
+    shade.on('pointerdown', () => { this.modal = false; layer.destroy(); });
+    this.input.keyboard?.once('keydown-ESC', () => { this.modal = false; layer.destroy(); });
   }
 }

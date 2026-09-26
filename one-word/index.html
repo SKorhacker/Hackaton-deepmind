@@ -2,22 +2,31 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>ONE WORD</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>ONE WORD — The Living Manuscript</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%2314121c'/><rect x='3' y='5' width='10' height='6' rx='1' fill='none' stroke='%23ffd166' stroke-width='1.5'/></svg>" />
 </head>
 <body class="in-menu">
   <div id="app">
     <header id="rulebar">
-      <div class="rule-label">RULE</div>
+      <div class="rule-label">REWRITE THE MANUSCRIPT</div>
       <div id="rules"></div>
       <div id="tutorial-tip" hidden>CLICK THIS WORD</div>
     </header>
 
-    <main id="game"></main>
+    <main id="game">
+      <nav id="mobile-menu" aria-label="Story menu"></nav>
+      <div id="pad" hidden aria-label="Movement controls">
+        <button class="pad-btn" data-dir="up" aria-label="move up">▲</button>
+        <button class="pad-btn" data-dir="left" aria-label="move left">◀</button>
+        <button class="pad-btn" data-dir="wait" aria-label="wait a turn">•</button>
+        <button class="pad-btn" data-dir="right" aria-label="move right">▶</button>
+        <button class="pad-btn" data-dir="down" aria-label="move down">▼</button>
+      </div>
+    </main>
 
     <footer id="statusbar">
       <span id="level-name"></span>
@@ -26,6 +35,8 @@
       <span class="stat">DEATHS <b id="stat-deaths">0</b></span>
       <span class="spacer"></span>
       <span class="keys">WASD / ARROWS move · SPACE wait</span>
+      <button id="btn-pad" class="ghost icon" aria-label="toggle on-screen pad">✛</button>
+      <button id="btn-fullscreen" class="ghost icon" aria-label="fullscreen">⛶</button>
       <button id="btn-menu" class="ghost">MENU</button>
       <button id="btn-restart">↻ RESTART <kbd>R</kbd></button>
     </footer>
@@ -34,7 +45,8 @@
   <div id="editor" class="panel" hidden>
     <div class="editor-title">Replace <span id="editor-old"></span> with:</div>
     <form id="editor-form" autocomplete="off">
-      <input id="editor-input" type="text" maxlength="24" spellcheck="false" placeholder="type one word" />
+      <input id="editor-input" type="text" maxlength="24" spellcheck="false" autocapitalize="off" autocorrect="off" enterkeyhint="go" placeholder="type one word" />
+      <div id="editor-chips"></div>
       <div class="editor-buttons">
         <button type="submit" id="editor-apply">APPLY</button>
         <button type="button" id="editor-cancel" class="ghost">CANCEL</button>
@@ -45,7 +57,8 @@
   </div>
 
   <div id="complete" class="overlay" hidden>
-    <div class="panel complete-panel">
+    <div class="panel complete-panel" role="dialog" aria-modal="true" aria-labelledby="complete-title">
+      <div class="chapter-seal" aria-hidden="true">✦</div>
       <div id="complete-title">LEVEL COMPLETE</div>
       <div id="complete-rule"></div>
       <div id="complete-new" hidden>✦ SOLUTION DISCOVERED ✦</div>

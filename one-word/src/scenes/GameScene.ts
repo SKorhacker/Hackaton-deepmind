@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { VIEW_W, VIEW_H, RENDER_SCALE } from '../config/Display';
 import { COLORS, DEBUG_MODE, OPENAI_MODEL, TILE, openAIKey } from '../config/GameConfig';
 import { LEVELS } from '../levels/levels';
 import { T, type LevelData, type Pos } from '../levels/LevelData';
@@ -9,18 +10,23 @@ import { LLMWordInterpreter } from '../rules/LLMWordInterpreter';
 import { World, type WorldEvent } from '../systems/World';
 import { RuleEditor } from '../ui/RuleEditor';
 import { LevelCompleteUI } from '../ui/LevelCompleteUI';
+import { comboKey } from '../systems/Solver';
+import { TouchPad } from '../ui/TouchPad';
+import { fullscreenSupported, isTouch, toggleFullscreen } from '../ui/Device';
 import { sfx } from '../ui/Sfx';
 import { fmtTime, foundFor, session } from '../config/Session';
+import { character, createCharacterAnimations, loadCharacters, pose, reducedMotion, type Facing } from '../config/Character';
 
 const FONT = '"Space Mono", monospace';
 
 // DOM widgets live for the whole page; scenes just rebind their callbacks.
 let editor: RuleEditor;
 let complete: LevelCompleteUI;
+let pad: TouchPad;
 
 // What a tile looks like under the current rule.
 const TILE_GLYPH: Partial<Record<Mechanic, string>> = {
-  DIE: '✕', ATTACK: '✕', HIDE: '◌', HEAL: '✚', BOUNCE: '⇡', FREEZE: '❄', SLEEP: 'z',
+  DIE: '✕', ATTACK: '✕', HIDE: '◌', HEAL: '✚', BOUNCE: '⇡', FREEZE: '❄', SLEEP: '☾',
 };
 
 const GUARD_STYLE: Record<string, { color: number; icon: string }> = {
@@ -29,7 +35,7 @@ const GUARD_STYLE: Record<string, { color: number; icon: string }> = {
   FOLLOW: { color: 0xff8fc8, icon: '♥' },
   HELP: { color: 0x5ee6a0, icon: '✚' },
   FLEE: { color: 0xffd166, icon: '?!' },
-  SLEEP: { color: 0x7c7896, icon: 'z' },
+  SLEEP: { color: 0x7c7896, icon: '☾' },
   FREEZE: { color: 0x9fdcff, icon: '❄' },
 };
 const guardStyle = (v: string) => GUARD_STYLE[v] ?? { color: COLORS.guard, icon: '·' };
@@ -41,7 +47,7 @@ const KEYMAP: Record<string, Pos> = {
   ArrowRight: { x: 1, y: 0 }, d: { x: 1, y: 0 }, D: { x: 1, y: 0 },
 };
 
-interface GuardView { box: Phaser.GameObjects.Container; body: Phaser.GameObjects.Arc; icon: Phaser.GameObjects.Text; lastVerb: string }
+interface GuardView { box: Phaser.GameObjects.Container; body: Phaser.GameObjects.Arc; icon: Phaser.GameObjects.Text; sprite: Phaser.GameObjects.Image; lastVerb: string }
 
 export class GameScene extends Phaser.Scene {
   private levelIndex = 0;
@@ -52,11 +58,16 @@ export class GameScene extends Phaser.Scene {
   private ox = 0;
   private oy = 0;
   private glyphs: { t: Phaser.GameObjects.Text; tile: T }[] = [];
-  private plates: { r: Phaser.GameObjects.Rectangle; x: number; y: number }[] = [];
+  private plates: { r: Phaser.GameObjects.Image; x: number; y: number; scale: number }[] = [];
   private doors: Phaser.GameObjects.Container[] = [];
   private keys: Phaser.GameObjects.Container[] = [];
   private player!: Phaser.GameObjects.Container;
-  private playerEyes!: Phaser.GameObjects.Container;
+  private playerSprite!: Phaser.GameObjects.Sprite;
+  private facing: Facing = 'down';
+  private walkUntil = 0;
+  private turnTimer?: Phaser.Time.TimerEvent;
+  private outcomeTimer?: Phaser.Time.TimerEvent;
+  private outcomeFx?: Phaser.GameObjects.Container;
   private playerLabel!: Phaser.GameObjects.Text;
   private guards = new Map<number, GuardView>();
   private overlay!: Phaser.GameObjects.Graphics;
@@ -70,22 +81,46 @@ export class GameScene extends Phaser.Scene {
   private wordsTried = 0;
   private deaths = 0;
   private finished = false;
+  private down: { x: number; y: number; wx: number; wy: number } | null = null;
+  private layoutObserver?: ResizeObserver;
+  private onPadResize = () => this.layout();
   private onKey = (e: KeyboardEvent) => this.handleKey(e);
 
   constructor() { super('game'); }
+
+  preload() {
+    loadCharacters(this);
+    this.load.spritesheet('sentinel-states', `${import.meta.env.BASE_URL}art/runtime/sentinel-states.png`, { frameWidth: 512, frameHeight: 512 });
+    for (const name of ['player', 'guard', 'exit', 'door', 'key', 'plate']) {
+      this.load.image(`painted-${name}`, `${import.meta.env.BASE_URL}art/runtime/${name}.png`);
+    }
+    for (const name of ['floor', 'wall', 'red', 'blue', 'desk']) {
+      this.load.image(`painted-${name}`, `${import.meta.env.BASE_URL}art/runtime/${name}.webp`);
+    }
+  }
 
   init(data: { levelIndex?: number }) {
     this.levelIndex = data.levelIndex ?? 0;
     this.level = LEVELS[this.levelIndex];
     this.glyphs = []; this.plates = []; this.doors = []; this.keys = []; this.guards.clear(); this.debugText = [];
     this.locked = false; this.finished = false;
+    this.turnTimer = undefined; this.outcomeTimer = undefined; this.outcomeFx = undefined; this.down = null;
     this.wordsTried = 0; this.deaths = 0;
+    this.facing = 'down'; this.walkUntil = 0;
   }
 
   create() {
+    this.cameras.main.setZoom(RENDER_SCALE).centerOn(VIEW_W / 2, VIEW_H / 2);
+    this.cameras.main.resetFX();
+    createCharacterAnimations(this);
     document.body.classList.remove('in-menu');
+    // The HUD changes the parent size; refresh its bounds before mapping pointer input.
+    this.scale.getParentBounds();
+    this.scale.refresh();
     editor ??= new RuleEditor();
     complete ??= new LevelCompleteUI();
+    pad ??= new TouchPad();
+    pad.onDir = dir => this.turn(dir);
     complete.hide();
     editor.close();
 
@@ -93,27 +128,44 @@ export class GameScene extends Phaser.Scene {
     this.rules = new RuleManager(this.level.rules, key ? new LLMWordInterpreter(key, OPENAI_MODEL) : null);
     this.world = new World(this.level, this.rules.rules);
 
-    const { width: W, height: H } = this.scale;
+    const W = VIEW_W, H = VIEW_H;
     this.ox = Math.round((W - this.level.width * TILE) / 2);
     this.oy = Math.round((H - this.level.height * TILE) / 2);
 
+    this.add.image(W / 2, H / 2, 'painted-desk').setDisplaySize(W, H).setDepth(-4);
+    const bw = this.level.width * TILE, bh = this.level.height * TILE;
+    this.add.rectangle(W / 2 + 3, H / 2 + 7, bw + 14, bh + 14, 0x1d160c, 0.6).setDepth(-3);
+    this.add.rectangle(W / 2, H / 2, bw + 10, bh + 10, 0x4b3021).setStrokeStyle(2, 0xcfac69).setDepth(-2);
+    this.add.rectangle(W / 2, H / 2, bw + 16, bh + 16).setStrokeStyle(1, 0x6e4c2e).setDepth(-1);
     this.drawTiles();
     this.overlay = this.add.graphics().setDepth(2);
     this.createEntities();
     this.debugGfx = this.add.graphics().setDepth(50);
-    this.aiNote = this.add.text(W / 2, H - 8, '', { fontFamily: FONT, fontSize: '13px', color: '#8a85a0' }).setOrigin(0.5, 1).setDepth(40);
+    this.aiNote = this.add.text(W / 2, H - 8, '', { resolution: RENDER_SCALE, fontFamily: FONT, fontSize: '13px', color: '#8a85a0' }).setOrigin(0.5, 1).setDepth(40);
 
     // Bind DOM UI to this level.
+    editor.onSelect = (ruleIndex, part) => this.rules.select(ruleIndex, part);
+    editor.resetSelection();
+    editor.setSuggestions(this.level.hintWords ?? []);
     editor.onSubmit = (raw) => this.submitWord(raw);
     editor.onOpen = () => { if (this.level.tutorial && !session.tutorialDone) editor.setTutorial('type'); };
-    editor.render(this.rules.rules, this.rules.editableIndex);
+    editor.render(this.rules.rules, this.rules.slots);
     editor.setTutorial(this.level.tutorial && !session.tutorialDone ? 'click' : null);
     document.getElementById('level-name')!.textContent = `LEVEL ${this.level.id} · ${this.level.name}`;
     (document.getElementById('btn-restart') as HTMLButtonElement).onclick = () => this.restart();
     (document.getElementById('btn-menu') as HTMLButtonElement).onclick = () => this.toMenu();
 
+    window.addEventListener('oneword-pad-resize', this.onPadResize);
+    this.layoutObserver = new ResizeObserver(() => this.layout());
+    this.layoutObserver.observe(document.getElementById('game')!);
+    this.layout();
+    this.bindPointer();
+    const fs = document.getElementById('btn-fullscreen') as HTMLButtonElement;
+    fs.hidden = !fullscreenSupported();
+    fs.onclick = () => void toggleFullscreen();
+    document.querySelector('.keys')!.textContent = isTouch() ? 'SWIPE or TAP a tile · TAP the golden word' : 'WASD / ARROWS move · SPACE wait';
     window.addEventListener('keydown', this.onKey);
-    this.events.once('shutdown', () => window.removeEventListener('keydown', this.onKey));
+    this.events.once('shutdown', () => { window.removeEventListener('keydown', this.onKey); this.layoutObserver?.disconnect(); window.removeEventListener('oneword-pad-resize', this.onPadResize); pad.onDir = () => {}; });
 
     this.startTime = this.time.now;
     this.updateStats();
@@ -123,6 +175,22 @@ export class GameScene extends Phaser.Scene {
 
   update() {
     if (!this.finished) this.updateStats();
+    if (this.playerSprite && !this.world.s.dead && !this.world.s.won) {
+      pose(this.playerSprite, character.outfit, this.facing, this.time.now < this.walkUntil ? 'walk' : 'idle');
+    }
+  }
+
+  private layout() {
+    const parent = document.getElementById('game')!;
+    const padSpace = document.body.classList.contains('pad-on') ? document.getElementById('pad')!.offsetHeight + 20 : 0;
+    const width = Math.max(1, parent.clientWidth), height = Math.max(1, parent.clientHeight - padSpace);
+    // The backing canvas remains dense; camera coordinates remain the same 56px grid.
+    const aspect = width / height;
+    const logicalWidth = Math.max(this.level.width * TILE + 36, (this.level.height * TILE + 52) * aspect);
+    const logicalHeight = logicalWidth / aspect;
+    this.scale.setGameSize(Math.round(width * RENDER_SCALE), Math.round(height * RENDER_SCALE));
+    this.cameras.main.setZoom(width * RENDER_SCALE / logicalWidth).centerOn(VIEW_W / 2, VIEW_H / 2);
+    this.aiNote?.setPosition(VIEW_W / 2, VIEW_H / 2 + logicalHeight / 2 - 8);
   }
 
   // ---------------- drawing ----------------
@@ -131,98 +199,94 @@ export class GameScene extends Phaser.Scene {
   private py(y: number) { return this.oy + y * TILE + TILE / 2; }
 
   private drawTiles() {
-    const g = this.add.graphics().setDepth(0);
     const L = this.level;
     for (let y = 0; y < L.height; y++) {
       for (let x = 0; x < L.width; x++) {
-        const t = L.tiles[y][x];
-        const X = this.ox + x * TILE, Y = this.oy + y * TILE;
-        if (t === T.WALL) {
-          g.fillStyle(COLORS.wall).fillRect(X, Y, TILE, TILE);
-          g.fillStyle(COLORS.wallTop).fillRect(X, Y, TILE, 6);
-          continue;
-        }
-        g.fillStyle((x + y) % 2 ? COLORS.floor : COLORS.floorAlt).fillRoundedRect(X + 2, Y + 2, TILE - 4, TILE - 4, 6);
-        if (t === T.RED || t === T.BLUE) {
-          const c = t === T.RED ? COLORS.red : COLORS.blue;
-          g.fillStyle(c).fillRoundedRect(X + 3, Y + 3, TILE - 6, TILE - 6, 7);
-          g.fillStyle(0x000000, 0.14).fillRoundedRect(X + 11, Y + 11, TILE - 22, TILE - 22, 5);
-          const txt = this.add.text(X + TILE / 2, Y + TILE / 2, '', { fontFamily: FONT, fontSize: '22px', fontStyle: 'bold', color: '#ffffff' })
-            .setOrigin(0.5).setAlpha(0.55).setDepth(1);
-          this.glyphs.push({ t: txt, tile: t });
-        } else if (t === T.EXIT) {
-          g.fillStyle(COLORS.exit, 0.22).fillRoundedRect(X + 3, Y + 3, TILE - 6, TILE - 6, 7);
-          const glow = this.add.rectangle(X + TILE / 2, Y + TILE / 2, TILE - 16, TILE - 16, COLORS.exit).setDepth(1);
-          this.tweens.add({ targets: glow, scale: 0.7, alpha: 0.55, duration: 800, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
-          this.add.text(X + TILE / 2, Y + TILE / 2, 'EXIT', { fontFamily: FONT, fontSize: '11px', fontStyle: 'bold', color: '#0b2a1c' }).setOrigin(0.5).setDepth(1);
-        } else if (t === T.PLATE) {
-          g.fillStyle(0x000000, 0.3).fillRoundedRect(X + 8, Y + 8, TILE - 16, TILE - 16, 5);
-          const r = this.add.rectangle(X + TILE / 2, Y + TILE / 2 - 2, TILE - 18, TILE - 18, COLORS.plate).setDepth(1);
-          this.plates.push({ r, x, y });
+        const tile = L.tiles[y][x];
+        const texture = tile === T.WALL ? 'wall' : tile === T.RED ? 'red' : tile === T.BLUE ? 'blue' : 'floor';
+        const slab = this.add.image(this.px(x), this.py(y), `painted-${texture}`).setDisplaySize(TILE, TILE).setDepth(0);
+        if (tile === T.FLOOR && (x + y) % 3 === 0) slab.setTint(0xe4ebef);
+        if (tile === T.WALL) continue;
+        if (tile === T.RED || tile === T.BLUE) {
+          const glyph = this.add.text(this.px(x), this.py(y), '', {
+            resolution: RENDER_SCALE, fontFamily: FONT, fontSize: '22px', fontStyle: 'bold', color: '#fff1d4',
+          }).setOrigin(0.5).setAlpha(0.8).setDepth(1);
+          glyph.setShadow(0, 1, '#331b18', 3, true, true);
+          this.glyphs.push({ t: glyph, tile });
+        } else if (tile === T.EXIT) {
+          const glow = this.add.ellipse(this.px(x), this.py(y) + 15, 45, 16, COLORS.exit, 0.3).setDepth(1);
+          this.art('exit', this.px(x), this.py(y) - 2, 51).setDepth(1);
+          if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+            this.tweens.add({ targets: glow, alpha: 0.12, scaleX: 0.8, duration: 1400, yoyo: true, repeat: -1 });
+          }
+          this.add.text(this.px(x), this.py(y) + 21, 'EXIT', { resolution: RENDER_SCALE, fontFamily: FONT, fontSize: '8px', color: '#d8ffec', backgroundColor: '#193d37', padding: { x: 3, y: 1 } }).setOrigin(0.5).setDepth(1);
+        } else if (tile === T.PLATE) {
+          const r = this.art('plate', this.px(x), this.py(y), 43).setDepth(1);
+          this.plates.push({ r, x, y, scale: r.scaleX });
         }
       }
     }
   }
 
+  private art(name: string, x: number, y: number, height: number) {
+    const image = this.add.image(x, y, `painted-${name}`);
+    return image.setScale(height / image.height);
+  }
+
   private createEntities() {
     for (const d of this.world.s.doors) {
       const c = this.add.container(this.px(d.x), this.py(d.y)).setDepth(3);
-      const body = this.add.rectangle(0, 0, TILE - 6, TILE - 6, COLORS.door).setStrokeStyle(3, 0xb79cff);
-      const bars = this.add.graphics();
-      bars.lineStyle(3, 0x5b36c9);
-      for (const bx of [-12, 0, 12]) bars.lineBetween(bx, -18, bx, 18);
-      c.add([body, bars]);
+      c.add(this.art('door', 0, -1, 53));
       this.doors.push(c);
     }
     for (const k of this.world.s.keys) {
       const c = this.add.container(this.px(k.x), this.py(k.y)).setDepth(3);
-      const ring = this.add.circle(-7, 0, 9).setStrokeStyle(5, COLORS.key);
-      const stem = this.add.rectangle(8, 0, 18, 5, COLORS.key);
-      const tooth = this.add.rectangle(14, 5, 4, 7, COLORS.key);
-      c.add([ring, stem, tooth]);
-      this.tweens.add({ targets: c, y: c.y - 5, duration: 700, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+      c.add([this.add.ellipse(0, 14, 25, 8, 0x000000, 0.3), this.art('key', 0, 0, 35)]);
+      if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        this.tweens.add({ targets: c, y: c.y - 4, duration: 1100, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+      }
       this.keys.push(c);
     }
     for (const g of this.world.s.guards) {
       const box = this.add.container(this.px(g.x), this.py(g.y)).setDepth(5);
-      const shadow = this.add.ellipse(0, 17, 34, 10, 0x000000, 0.3);
-      const body = this.add.circle(0, 0, 19, COLORS.guard).setStrokeStyle(3, 0x000000, 0.25);
-      const eyes = this.add.graphics();
-      eyes.fillStyle(0x1b1020).fillRect(-8, -5, 5, 7).fillRect(4, -5, 5, 7);
-      const icon = this.add.text(0, -34, '', { fontFamily: FONT, fontSize: '16px', fontStyle: 'bold', color: '#ffffff' }).setOrigin(0.5);
-      box.add([shadow, body, eyes, icon]);
-      this.guards.set(g.id, { box, body, icon, lastVerb: '' });
+      const shadow = this.add.ellipse(0, 19, 39, 11, 0x000000, 0.4);
+      // A colored intent ring supplements the symbol, leaving painted materials intact.
+      const body = this.add.circle(0, 5, 23, COLORS.guard, 0.14).setStrokeStyle(1, COLORS.guard, 0.8);
+      const sprite = this.add.image(0, 22, 'sentinel-states', 0).setOrigin(0.5, 0.95).setDisplaySize(60, 60);
+      const icon = this.add.text(18, -22, '', {
+        resolution: RENDER_SCALE, fontFamily: FONT, fontSize: '12px', fontStyle: 'bold', color: '#ffffff',
+        backgroundColor: '#152631', padding: { x: 3, y: 2 },
+      }).setOrigin(0.5);
+      box.add([shadow, body, sprite, icon]);
+      this.guards.set(g.id, { box, body, icon, sprite, lastVerb: '' });
     }
     const p = this.world.s.player;
     this.player = this.add.container(this.px(p.x), this.py(p.y)).setDepth(6);
-    const shadow = this.add.ellipse(0, 18, 34, 10, 0x000000, 0.3);
-    const body = this.add.graphics();
-    body.fillStyle(COLORS.player).fillRoundedRect(-18, -18, 36, 36, 9);
-    this.playerEyes = this.add.container(0, 0);
-    const eg = this.add.graphics();
-    eg.fillStyle(0x14121c).fillRect(-9, -6, 6, 9).fillRect(3, -6, 6, 9);
-    this.playerEyes.add(eg);
-    this.playerLabel = this.add.text(0, -34, '', { fontFamily: FONT, fontSize: '11px', fontStyle: 'bold', color: '#ece8f5', backgroundColor: '#14121ccc', padding: { x: 4, y: 1 } }).setOrigin(0.5);
-    this.player.add([shadow, body, this.playerEyes, this.playerLabel]);
+    const shadow = this.add.ellipse(0, 20, 28, 9, 0x000000, 0.4);
+    this.playerSprite = this.add.sprite(0, 21, `hero-${character.outfit}`, 0).setOrigin(0.5, 121 / 128).setDisplaySize(60, 60);
+    pose(this.playerSprite, character.outfit, this.facing, 'idle');
+    this.playerLabel = this.add.text(0, -34, '', { resolution: RENDER_SCALE, fontFamily: FONT, fontSize: '10px', fontStyle: 'bold', color: '#f0e6cd', backgroundColor: '#14242d', padding: { x: 4, y: 1 } }).setOrigin(0.5);
+    this.player.add([shadow, this.playerSprite, this.playerLabel]);
   }
 
   /** Bring every view in line with the world state. */
   private sync(animate: boolean, playerPath?: Pos[]) {
     const s = this.world.s;
-    const dur = animate ? 110 : 0;
-
-    // Player (chain through bounce hops).
+    const moving = animate && !!playerPath?.length;
     const path = playerPath?.length ? playerPath : [{ x: s.player.x, y: s.player.y }];
-    if (animate) {
+    if (moving) {
+      this.tweens.killTweensOf(this.player);
+      this.walkUntil = this.time.now + this.moveDuration(path.length);
+      pose(this.playerSprite, character.outfit, this.facing, 'walk');
+      // Every step lands on the tile center. Never stretch or overshoot the artwork.
       this.tweens.chain({
         targets: this.player,
-        tweens: path.map((p, i) => ({
-          x: this.px(p.x), y: this.py(p.y), duration: i === 0 ? dur : 120,
-          ease: i === 0 ? 'Quad.easeOut' : 'Back.easeOut',
-          ...(i > 0 ? { scaleY: { from: 0.7, to: 1 } } : {}),
+        tweens: path.map(p => ({
+          x: this.px(p.x), y: this.py(p.y), duration: this.stepDuration(),
+          ease: reducedMotion() ? 'Linear' : 'Sine.easeInOut',
         })),
       });
-    } else {
+    } else if (!animate) {
       this.player.setPosition(this.px(s.player.x), this.py(s.player.y));
     }
     this.player.setAlpha(s.player.hidden ? 0.35 : 1);
@@ -236,7 +300,7 @@ export class GameScene extends Phaser.Scene {
     }
     for (const pl of this.plates) {
       const down = (s.player.x === pl.x && s.player.y === pl.y) || !!this.world.guardAt(pl.x, pl.y);
-      pl.r.setFillStyle(down ? COLORS.plateDown : COLORS.plate).setScale(down ? 0.82 : 1);
+      pl.r.setTint(down ? 0x90e5bd : 0xffffff).setScale(pl.scale * (down ? 0.88 : 1));
     }
     s.doors.forEach((d, i) => {
       const c = this.doors[i];
@@ -249,15 +313,17 @@ export class GameScene extends Phaser.Scene {
       const v = this.guards.get(g.id)!;
       const intent = this.world.guardIntent(g);
       const st = guardStyle(intent.verb);
-      v.body.setFillStyle(st.color);
-      v.icon.setText(intent.lethal || intent.verb !== 'CHASE' ? st.icon : '·');
-      v.box.setAlpha(intent.verb === 'SLEEP' ? 0.75 : 1);
-      if (animate) this.tweens.add({ targets: v.box, x: this.px(g.x), y: this.py(g.y), duration: 130, ease: 'Quad.easeOut' });
+      v.body.setFillStyle(st.color, 0.14).setStrokeStyle(1, st.color, 0.85);
+      v.icon.setText(st.icon).setColor(Phaser.Display.Color.IntegerToColor(st.color).rgba);
+      v.sprite.setFrame(intent.verb === 'SLEEP' ? 1 : intent.verb === 'FREEZE' ? 3 : ['HELP', 'FOLLOW', 'FLEE'].includes(intent.verb) ? 2 : 0);
+      v.box.setAlpha(1);
+      this.tweens.killTweensOf(v.box);
+      if (animate) this.tweens.add({ targets: v.box, x: this.px(g.x), y: this.py(g.y), duration: this.stepDuration(), ease: 'Sine.easeInOut' });
       else v.box.setPosition(this.px(g.x), this.py(g.y));
-      if (intent.verb === 'SLEEP' && v.lastVerb !== 'SLEEP') {
-        this.tweens.add({ targets: v.icon, y: -40, alpha: 0.4, duration: 900, yoyo: true, repeat: -1 });
+      if (!reducedMotion() && intent.verb === 'SLEEP' && v.lastVerb !== 'SLEEP') {
+        this.tweens.add({ targets: v.icon, y: -27, alpha: 0.4, duration: 900, yoyo: true, repeat: -1 });
       } else if (intent.verb !== 'SLEEP' && v.lastVerb === 'SLEEP') {
-        this.tweens.killTweensOf(v.icon); v.icon.setY(-34).setAlpha(1);
+        this.tweens.killTweensOf(v.icon); v.icon.setY(-22).setAlpha(1);
       }
       v.lastVerb = intent.verb;
     }
@@ -294,24 +360,60 @@ export class GameScene extends Phaser.Scene {
     if (!this.debug) return;
     const L = this.level;
     for (let y = 0; y < L.height; y++) for (let x = 0; x < L.width; x++) {
-      this.debugText.push(this.add.text(this.ox + x * TILE + 3, this.oy + y * TILE + 2, `${x},${y}`, { fontFamily: FONT, fontSize: '9px', color: '#ffffff' }).setAlpha(0.45).setDepth(50));
+      this.debugText.push(this.add.text(this.ox + x * TILE + 3, this.oy + y * TILE + 2, `${x},${y}`, { resolution: RENDER_SCALE, fontFamily: FONT, fontSize: '9px', color: '#ffffff' }).setAlpha(0.45).setDepth(50));
     }
     for (const g of this.world.s.guards) {
       const intent = this.world.guardIntent(g);
       this.debugGfx.lineStyle(2, 0x00ffff, 0.8);
       let last = { x: g.x, y: g.y };
       for (const p of intent.path) { this.debugGfx.lineBetween(this.px(last.x), this.py(last.y), this.px(p.x), this.py(p.y)); last = p; }
-      this.debugText.push(this.add.text(this.px(g.x), this.py(g.y) + 24, `${intent.verb}${intent.lethal ? ' lethal' : ''}\n→ ${intent.target ? `${intent.target.x},${intent.target.y}` : 'none'}`, { fontFamily: FONT, fontSize: '10px', color: '#00ffff', align: 'center' }).setOrigin(0.5, 0).setDepth(50));
+      this.debugText.push(this.add.text(this.px(g.x), this.py(g.y) + 24, `${intent.verb}${intent.lethal ? ' lethal' : ''}\n→ ${intent.target ? `${intent.target.x},${intent.target.y}` : 'none'}`, { resolution: RENDER_SCALE, fontFamily: FONT, fontSize: '10px', color: '#00ffff', align: 'center' }).setOrigin(0.5, 0).setDepth(50));
     }
     const p = this.world.s.player;
     this.debugText.push(this.add.text(8, 8, [
       `rules: ${this.rules.rules.map((r) => ruleTokens(r).map((t) => t.text).join(' ')).join(' | ')}`,
       `player ${p.x},${p.y} hidden=${p.hidden} frozen=${p.frozen} turn=${this.world.s.turn}`,
       `doors: ${this.world.s.doors.map((d) => (d.open ? 'open' : 'closed')).join(',')}  keys: ${this.world.s.keys.map((k) => (k.taken ? 'taken' : 'here')).join(',')}`,
-    ].join('\n'), { fontFamily: FONT, fontSize: '11px', color: '#00ffff' }).setDepth(50));
+    ].join('\n'), { resolution: RENDER_SCALE, fontFamily: FONT, fontSize: '11px', color: '#00ffff' }).setDepth(50));
   }
 
   // ---------------- input & turns ----------------
+
+  /** Touch/mouse play: swipe in a direction, tap a neighbouring tile, tap yourself to wait. */
+  private bindPointer() {
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
+      this.down = { x: p.x, y: p.y, wx: p.worldX, wy: p.worldY };
+    });
+    this.input.on('pointerup', (p: Phaser.Input.Pointer) => {
+      const d = this.down;
+      this.down = null;
+      if (!d || editor.isOpen || complete.isOpen) return;
+      const dx = p.x - d.x, dy = p.y - d.y;
+      if (Math.hypot(dx, dy) >= 26 * RENDER_SCALE) {
+        this.turn(Math.abs(dx) > Math.abs(dy) ? { x: Math.sign(dx), y: 0 } : { x: 0, y: Math.sign(dy) });
+        return;
+      }
+      this.tapTile(d.wx, d.wy);
+    });
+  }
+
+  /** A tap moves one step towards the tile under the finger (tapping yourself waits). */
+  private tapTile(worldX: number, worldY: number) {
+    const tx = Math.floor((worldX - this.ox) / TILE);
+    const ty = Math.floor((worldY - this.oy) / TILE);
+    if (tx < 0 || ty < 0 || tx >= this.level.width || ty >= this.level.height) return;
+    const p = this.world.s.player;
+    const dx = tx - p.x, dy = ty - p.y;
+    if (!dx && !dy) { this.turn(null); return; }
+    const horizontal: Pos = { x: Math.sign(dx), y: 0 };
+    const vertical: Pos = { x: 0, y: Math.sign(dy) };
+    const order = Math.abs(dx) > Math.abs(dy) ? [horizontal, vertical] : [vertical, horizontal];
+    for (const dir of order) {
+      if (!dir.x && !dir.y) continue;
+      if (this.world.tile(p.x + dir.x, p.y + dir.y) !== T.WALL) { this.turn(dir); return; }
+    }
+    sfx.bump();
+  }
 
   private handleKey(e: KeyboardEvent) {
     if (editor.isOpen || (e.target as HTMLElement)?.tagName === 'INPUT') return;
@@ -327,23 +429,32 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  private stepDuration() { return reducedMotion() ? 70 : 170; }
+  private moveDuration(steps: number) { return Math.max(1, steps) * this.stepDuration(); }
+
   private turn(dir: Pos | null) {
-    if (this.locked || this.finished || this.world.s.dead) return;
-    if (dir) this.playerEyes.setPosition(dir.x * 3, dir.y * 3);
+    if (editor.isOpen || complete.isOpen || this.locked || this.finished || this.world.s.dead) return;
+    if (dir) this.facing = dir.x > 0 ? 'right' : dir.x < 0 ? 'left' : dir.y < 0 ? 'up' : 'down';
     const ev = this.world.step(dir);
     if (!ev.length) {
       sfx.bump();
-      if (dir) this.tweens.add({ targets: this.player, x: this.player.x + dir.x * 5, y: this.player.y + dir.y * 5, duration: 50, yoyo: true });
+      // A blocked move keeps the character's feet planted.
+      pose(this.playerSprite, character.outfit, this.facing, 'idle');
       return;
     }
     this.locked = true;
-    this.time.delayedCall(125, () => { this.locked = false; });
     const hops: Pos[] = [];
     for (const e of ev) if (e.type === 'move' || e.type === 'bounce') hops.push({ x: e.x, y: e.y });
     this.effects(ev);
     this.sync(true, hops);
-    if (this.world.s.dead) this.onDeath();
-    else if (this.world.s.won) this.onWin();
+    this.turnTimer?.remove(false);
+    this.turnTimer = this.time.delayedCall(this.moveDuration(hops.length) + 35, () => {
+      this.walkUntil = 0;
+      pose(this.playerSprite, character.outfit, this.facing, 'idle');
+      if (this.world.s.dead) this.onDeath();
+      else if (this.world.s.won) this.onWin();
+      else this.locked = false;
+    });
   }
 
   private effects(ev: WorldEvent[]) {
@@ -362,7 +473,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private burst(tx: number, ty: number, color: number, n: number, up = false) {
-    for (let i = 0; i < n; i++) {
+    if (reducedMotion()) return;
+    for (let i = 0; i < Math.min(n, 16); i++) {
       const a = Math.random() * Math.PI * 2, r = 14 + Math.random() * 26;
       const dot = this.add.rectangle(this.px(tx), this.py(ty), 6, 6, color).setDepth(30);
       this.tweens.add({
@@ -374,7 +486,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private floatText(at: Pos, text: string, color: string) {
-    const t = this.add.text(this.px(at.x), this.py(at.y) - 30, text, { fontFamily: FONT, fontSize: '13px', fontStyle: 'bold', color }).setOrigin(0.5).setDepth(35);
+    const t = this.add.text(this.px(at.x), this.py(at.y) - 30, text, { resolution: RENDER_SCALE, fontFamily: FONT, fontSize: '13px', fontStyle: 'bold', color }).setOrigin(0.5).setDepth(35);
     this.tweens.add({ targets: t, y: t.y - 26, alpha: 0, duration: 900, ease: 'Quad.easeOut', onComplete: () => t.destroy() });
   }
 
@@ -386,35 +498,79 @@ export class GameScene extends Phaser.Scene {
     el.classList.add('show');
   }
 
+  /** Ink, parchment and gilding echo the manuscript rather than arcade flashes. */
+  private outcomeIllustration(won: boolean) {
+    const x = this.player.x, y = this.player.y;
+    const layer = this.add.container(0, 0).setDepth(25);
+    this.outcomeFx = layer;
+    layer.add(this.add.rectangle(VIEW_W / 2, VIEW_H / 2, this.cameras.main.width / this.cameras.main.zoom, this.cameras.main.height / this.cameras.main.zoom, 0x0b1820, 0.22));
+    const halo = this.add.ellipse(x, y + 12, 58, 22, won ? 0xcaae6f : 0x1c1723, 0.45);
+    const ring = this.add.ellipse(x, y + 12, 64, 28).setStrokeStyle(1.5, won ? 0xe4cb8a : 0xb8887c, 0.8);
+    layer.add([halo, ring]);
+    // The player remains above the local illustration until it fades into the page.
+    this.player.setDepth(26);
+    const caption = this.add.text(VIEW_W / 2, VIEW_H / 2 + this.cameras.main.height / this.cameras.main.zoom / 2 - 22, won ? 'A new passage opens' : 'The ink settles. Your story continues.', {
+      resolution: RENDER_SCALE, fontFamily: '"Cormorant Garamond", Georgia, serif', fontSize: '24px',
+      fontStyle: 'italic', color: won ? '#efdbab' : '#e1c8b2', backgroundColor: '#10212be8', padding: { x: 14, y: 5 },
+    }).setOrigin(0.5).setAlpha(0);
+    layer.add(caption);
+    this.tweens.add({ targets: caption, alpha: 1, duration: reducedMotion() ? 100 : 350 });
+    if (!reducedMotion()) {
+      this.tweens.add({ targets: [halo, ring], scaleX: won ? 2.3 : 1.65, scaleY: won ? 1.8 : 1.3, alpha: 0, duration: 1000, ease: 'Sine.easeOut' });
+      // Small paper leaves and ink flecks; bounded counts also keep phone rendering light.
+      for (let i = 0; i < 16; i++) {
+        const a = i * Math.PI * 2 / 16;
+        const leaf = this.add.triangle(x, y, -3, 0, 0, -7, 3, 2, won ? (i % 2 ? 0xd6b575 : 0xf0e6cd) : (i % 2 ? 0x574653 : 0xa67c68), 0.9);
+        layer.add(leaf);
+        this.tweens.add({ targets: leaf, x: x + Math.cos(a) * (36 + i % 4 * 9),
+          y: y + (won ? -35 - i % 5 * 14 : Math.sin(a) * 30 + 14),
+          angle: i % 2 ? 75 : -75, alpha: 0, duration: 650 + i * 28, delay: i * 12, ease: 'Sine.easeOut' });
+      }
+    }
+  }
+
   private onDeath() {
-    const s = this.world.s;
     this.deaths++;
     sfx.death();
-    this.cameras.main.shake(260, 0.012);
-    this.cameras.main.flash(160, 229, 72, 77);
-    this.burst(s.player.x, s.player.y, COLORS.red, 26);
-    this.tweens.add({ targets: this.player, scale: 1.4, alpha: 0, angle: 30, duration: 320 });
-    this.toast(s.deathCause === 'red' ? `YOU ${ruleTokens(this.rules.rules.find((r) => r.subject === 'YOU')!)[1].text} ON RED` : 'CAUGHT!');
-    this.time.delayedCall(850, () => this.resetWorld(false));
+    this.outcomeIllustration(false);
+    this.playerSprite.stop().setTint(0xb2a398);
+    this.tweens.add({ targets: this.player, alpha: 0, duration: reducedMotion() ? 180 : 580, delay: 100, ease: 'Sine.easeIn' });
+    this.outcomeTimer = this.time.delayedCall(reducedMotion() ? 700 : 1250, () => this.resetWorld(false));
   }
 
   private onWin() {
     this.finished = true;
     sfx.win();
-    this.cameras.main.flash(200, 94, 230, 160);
-    this.burst(this.world.s.player.x, this.world.s.player.y, COLORS.exit, 30, true);
-    this.time.delayedCall(550, () => this.showComplete());
+    this.outcomeIllustration(true);
+    this.playerSprite.stop();
+    this.tweens.add({ targets: this.player, alpha: 0, duration: reducedMotion() ? 200 : 650, delay: 250, ease: 'Sine.easeIn' });
+    this.outcomeTimer = this.time.delayedCall(reducedMotion() ? 650 : 1250, () => this.showComplete());
+  }
+
+  private clearOutcome() {
+    this.turnTimer?.remove(false);
+    this.outcomeTimer?.remove(false);
+    if (this.outcomeFx) {
+      this.tweens.killTweensOf(this.outcomeFx.list);
+      this.outcomeFx.destroy();
+      this.outcomeFx = undefined;
+    }
+    this.player.setDepth(6);
+    this.playerSprite.clearTint();
   }
 
   /** Put entities back. `fullReset` also restores the original rule (R key). */
   private resetWorld(fullReset: boolean) {
+    this.clearOutcome();
     if (fullReset) {
       this.rules.reset();
-      editor.render(this.rules.rules, this.rules.editableIndex);
+      editor.render(this.rules.rules, this.rules.slots);
     }
     this.world = new World(this.level, this.rules.rules);
     this.tweens.killTweensOf(this.player);
     this.player.setScale(1).setAngle(0).setAlpha(1);
+    this.facing = 'down'; this.walkUntil = 0;
+    pose(this.playerSprite, character.outfit, this.facing, 'idle');
     this.keys.forEach((k) => k.setVisible(true));
     this.locked = false;
     this.finished = false;
@@ -426,7 +582,7 @@ export class GameScene extends Phaser.Scene {
     complete.hide();
     editor.close();
     this.aiNote.setText('');
-    this.cameras.main.flash(120, 20, 18, 28);
+    if (!reducedMotion()) this.cameras.main.flash(120, 20, 18, 28);
     this.resetWorld(true);
   }
 
@@ -446,10 +602,13 @@ export class GameScene extends Phaser.Scene {
   // ---------------- the rewrite ----------------
 
   private async submitWord(raw: string) {
+    if (this.locked || this.finished || this.world.s.dead) return { ok: false as const, message: 'LET THIS MOMENT FINISH FIRST.' };
     if (!raw.trim()) return { ok: false as const, message: 'TYPE A WORD.' };
+    const originalWorld = this.world, originalSlot = this.rules.slot;
     this.wordsTried++;
     this.updateStats();
     const res = await this.rules.interpret(raw);
+    if (this.world !== originalWorld || this.rules.slot !== originalSlot || !this.scene.isActive()) return { ok: false as const, message: 'THIS PAGE HAS ALREADY TURNED.' };
     const early = this.levelIndex < 2 && this.level.hintWords;
     const hint = early ? `Try words like: ${this.level.hintWords!.join(', ')}` : undefined;
     if (!res.ok) {
@@ -463,9 +622,11 @@ export class GameScene extends Phaser.Scene {
     if (res.token === this.rules.currentToken) {
       return { ok: false as const, message: "THAT'S ALREADY THE RULE." };
     }
+    if (!this.scene.isActive() || this.finished || this.world.s.dead) return { ok: false as const, message: 'THIS PAGE HAS ALREADY TURNED.' };
+    editor.rememberWord(raw);
     this.rules.apply(res.token);
     this.world.setRules(this.rules.rules);
-    void editor.playRewrite(this.rules.rules, this.rules.editableIndex);
+    void editor.playRewrite(this.rules.rules, this.rules.slots);
     this.playRewriteFx();
     if (res.source === 'ai') {
       this.aiNote.setText(`AI understood "${raw.trim().toLowerCase()}" as ${res.token}${res.note ? ` — ${res.note}` : ''}`).setAlpha(1);
@@ -483,15 +644,14 @@ export class GameScene extends Phaser.Scene {
   private playRewriteFx() {
     sfx.rewrite();
     this.toast('RULE REWRITTEN');
-    this.cameras.main.flash(220, 255, 209, 102);
-    this.cameras.main.shake(140, 0.004);
+    if (reducedMotion()) { this.sync(false); return; }
     // Ripple the things the rule talks about.
     for (const gl of this.glyphs) {
-      this.tweens.add({ targets: gl.t, scale: { from: 2.2, to: 1 }, alpha: { from: 1, to: 0.55 }, duration: 450, delay: Math.random() * 150, ease: 'Back.easeOut' });
+      this.tweens.add({ targets: gl.t, scale: { from: 1.1, to: 1 }, alpha: { from: 1, to: 0.55 }, duration: 450, delay: Math.random() * 150, ease: 'Sine.easeOut' });
     }
     for (const g of this.world.s.guards) {
       const v = this.guards.get(g.id)!;
-      this.tweens.add({ targets: v.box, scale: { from: 1.35, to: 1 }, duration: 380, ease: 'Back.easeOut' });
+      this.tweens.add({ targets: v.box, alpha: { from: 0.55, to: 1 }, duration: 380, ease: 'Sine.easeOut' });
       this.burst(g.x, g.y, guardStyle(this.world.guardIntent(g).verb).color, 14);
     }
     this.sync(true);
@@ -502,7 +662,7 @@ export class GameScene extends Phaser.Scene {
   // ---------------- level complete ----------------
 
   private showComplete() {
-    const token = this.rules.currentToken;
+    const token = comboKey(this.rules.currentWords);
     const found = foundFor(this.level.id);
     const isNew = !found.has(token);
     found.add(token);
@@ -511,11 +671,12 @@ export class GameScene extends Phaser.Scene {
     if (!prev || time < prev.time) session.best.set(this.level.id, { time, words: this.wordsTried, deaths: this.deaths, solution: token });
 
     const ruleHtml = this.rules.rules.map((r) => ruleTokens(r).map((t) => (t.editable ? `<span class="hl">${t.text}</span>` : t.text)).join(' ')).join('<br>');
-    const expected = this.level.solutions.includes(token);
-    const unfound = this.level.solutions.filter((s) => !found.has(s));
+    const solutions = this.level.solutions.map(comboKey);
+    const expected = solutions.includes(token);
+    const unfound = solutions.filter((s) => !found.has(s));
     const last = this.levelIndex === LEVELS.length - 1;
     complete.show({
-      title: expected ? 'LEVEL COMPLETE' : 'LEVEL COMPLETE?!',
+      title: expected ? 'Chapter complete' : 'An unexpected ending',
       ruleHtml,
       isNewSolution: isNew,
       stats: [
@@ -524,7 +685,7 @@ export class GameScene extends Phaser.Scene {
         ['Deaths', String(this.deaths)],
         ['Solution', expected ? token : `${token} (unexpected!)`],
       ],
-      solutions: this.level.solutions.length > 1 ? { list: this.level.solutions, found } : null,
+      solutions: solutions.length > 1 ? { list: solutions, found } : null,
       nextLabel: last ? 'FINISH →' : 'NEXT LEVEL →',
       replayLabel: unfound.length ? 'TRY ANOTHER WORD' : undefined,
     }, () => {
@@ -544,7 +705,7 @@ export class GameScene extends Phaser.Scene {
     const rows: [string, string][] = LEVELS.map((l) => {
       const f = foundFor(l.id);
       total += l.solutions.length;
-      got += l.solutions.filter((s) => f.has(s)).length;
+      got += l.solutions.filter((s) => f.has(comboKey(s))).length;
       const b = session.best.get(l.id);
       return [`${l.id} ${l.name}`, b ? `${b.solution} · ${fmtTime(b.time)}` : '—'];
     });

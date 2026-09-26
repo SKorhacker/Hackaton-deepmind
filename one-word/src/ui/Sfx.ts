@@ -36,6 +36,6 @@ export const sfx = {
   hide: () => tone(500, 0.2, 'sine', 0.05, 250),
   heal: () => { tone(520, 0.1, 'sine', 0.06); tone(780, 0.18, 'sine', 0.06, undefined, 0.08); },
   freeze: () => tone(1200, 0.25, 'sine', 0.04, 600),
-  death: () => tone(300, 0.5, 'sawtooth', 0.07, 40),
-  win: () => [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.18, 'square', 0.05, undefined, i * 0.09)),
+  death: () => { tone(196, 0.45, 'triangle', 0.045, 98); tone(147, 0.65, 'sine', 0.035, 73, 0.12); },
+  win: () => [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.48, 'sine', 0.045, undefined, i * 0.14)),
 };
