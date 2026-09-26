@@ -4,6 +4,7 @@
 export const MECHANICS = [
   'DIE', 'HIDE', 'HEAL', 'BOUNCE', 'FREEZE', 'FOLLOW',
   'CHASE', 'FLEE', 'HELP', 'SLEEP', 'OPEN', 'ATTACK',
+  'SLIDE', 'TELEPORT', 'PUSH', 'SWAP',
 ] as const;
 export type Mechanic = (typeof MECHANICS)[number];
 

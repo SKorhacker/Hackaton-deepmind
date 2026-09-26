@@ -102,4 +102,15 @@ export const sfx = {
   click: () => audio.playSfx('click'),
   death: () => { audio.playSfx('death'); audio.playSting('lose'); },
   win: () => { audio.playSfx('win'); audio.playSting('win'); },
+  /** Blink across the board. */
+  teleport: () => {
+    tone(300, 0.12, { type: 'sine', vol: 0.05, slideTo: 1200, cutoff: 3000 });
+    tone(1200, 0.18, { type: 'sine', vol: 0.04, slideTo: 300, delay: 0.1 });
+    air(0.2, 4000, 800, 0.03, 0.02);
+  },
+  /** Shoving something heavy. */
+  push: () => {
+    tone(104, 0.14, { type: 'sine', vol: 0.07, slideTo: 70, cutoff: 600 });
+    air(0.1, 1200, 400, 0.025);
+  },
 };

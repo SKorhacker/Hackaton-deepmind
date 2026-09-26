@@ -16,16 +16,20 @@ const WORDS: Record<string, string> = {
   help: 'HELP', protect: 'HELP', assist: 'HELP', aid: 'HELP', serve: 'HELP', support: 'HELP', defend: 'HELP', save: 'HELP', obey: 'HELP', befriend: 'HELP',
   sleep: 'SLEEP', nap: 'SLEEP', snooze: 'SLEEP', doze: 'SLEEP', slumber: 'SLEEP', dream: 'SLEEP', snore: 'SLEEP', faint: 'SLEEP', slept: 'SLEEP', relax: 'SLEEP',
   open: 'OPEN', unlock: 'OPEN', unseal: 'OPEN',
+  slide: 'SLIDE', skate: 'SLIDE', glide: 'SLIDE', slip: 'SLIDE', skid: 'SLIDE', surf: 'SLIDE', coast: 'SLIDE', sled: 'SLIDE', drift: 'SLIDE',
+  teleport: 'TELEPORT', warp: 'TELEPORT', blink: 'TELEPORT', beam: 'TELEPORT', portal: 'TELEPORT', transport: 'TELEPORT', jaunt: 'TELEPORT', apparate: 'TELEPORT', zap: 'TELEPORT',
+  push: 'PUSH', shove: 'PUSH', nudge: 'PUSH', bump: 'PUSH', knock: 'PUSH', ram: 'PUSH', thrust: 'PUSH', propel: 'PUSH', kick: 'PUSH',
+  swap: 'SWAP', switch: 'SWAP', exchange: 'SWAP', trade: 'SWAP', replace: 'SWAP', trick: 'SWAP', flip: 'SWAP', rotate: 'SWAP',
   attack: 'ATTACK', fight: 'ATTACK', hit: 'ATTACK', punch: 'ATTACK', strike: 'ATTACK', bite: 'ATTACK', eat: 'ATTACK', destroy: 'ATTACK', ate: 'ATTACK',
   // --- nouns ---
   you: 'YOU', me: 'YOU', player: 'YOU', i: 'YOU', myself: 'YOU', hero: 'YOU',
   guard: 'GUARD', guards: 'GUARD', enemy: 'GUARD', monster: 'GUARD', them: 'GUARD', it: 'GUARD',
   everyone: 'EVERYONE', everybody: 'EVERYONE', all: 'EVERYONE', anyone: 'EVERYONE', we: 'EVERYONE', us: 'EVERYONE', both: 'EVERYONE',
   key: 'KEY', keys: 'KEY', treasure: 'KEY', gold: 'KEY', coin: 'KEY', loot: 'KEY', prize: 'KEY',
-  exit: 'EXIT', goal: 'EXIT', finish: 'EXIT', end: 'EXIT', portal: 'EXIT', flag: 'EXIT',
+  exit: 'EXIT', goal: 'EXIT', finish: 'EXIT', end: 'EXIT', flag: 'EXIT',
   red: 'RED', lava: 'RED', fire: 'RED', crimson: 'RED', scarlet: 'RED',
   blue: 'BLUE', water: 'BLUE', ice: 'BLUE',
-  plate: 'PLATE', button: 'PLATE', switch: 'PLATE', lever: 'PLATE', pad: 'PLATE', plates: 'PLATE',
+  plate: 'PLATE', button: 'PLATE', lever: 'PLATE', pad: 'PLATE', plates: 'PLATE',
   door: 'DOOR', gate: 'DOOR', doors: 'DOOR',
 };
 
