@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { COLORS, aiProvider, setAIKey } from '../config/GameConfig';
+import { COLORS, aiProvider, creativeMode, setAIKey, setCreativeMode } from '../config/GameConfig';
 import { LEVELS } from '../levels/levels';
 import { session } from '../config/Session';
 import { isTouch } from '../ui/Device';
@@ -31,14 +31,17 @@ export class MenuScene extends Phaser.Scene {
     const fs = (px: number, min = 13) => `${Math.max(min, Math.round(px * s))}px`;
     this.drawBackdrop(W, H);
 
-    // Bottom-up layout: the level row is anchored to the bottom edge, the buttons stack
-    // upward from it, and the title takes whatever height is left (landscape phones
-    // otherwise push the last button onto the level row).
+    // Bottom-up layout: the level row is anchored to the bottom edge, the mode picker and
+    // buttons stack upward from it, and the title takes whatever height is left (landscape
+    // phones otherwise push the last button onto the level row).
     const btnH = Math.max(MIN_TAP, 48 * s);
+    const modeH = Math.max(36, 34 * s);
+    const capH = Math.max(26, 30 * s);
+    const btnGap = Math.max(8, 14 * s);
     const levelY = H - Math.max(40, 64 * s);
     const labelY = levelY - Math.max(26, 30 * s);
-    const btnGap = Math.max(8, 14 * s);
-    const stackTop = Math.min(H * 0.52 - btnH / 2, labelY - Math.max(10, 16 * s) - (btnH * 3 + btnGap * 2));
+    const blockH = modeH + capH + btnGap + btnH * 3 + btnGap * 2;
+    const stackTop = Math.min(H * 0.34, labelY - Math.max(10, 16 * s) - blockH);
     const headH = Math.max(60, stackTop - Math.max(8, 12 * s));
     const titlePx = Math.round(Math.min(84 * s, headH * 0.34));
 
@@ -53,8 +56,28 @@ export class MenuScene extends Phaser.Scene {
     });
     this.add.text(W / 2, title.getBounds().bottom + Math.max(8, 10 * s), 'Change one word.\nChange the world.', { fontFamily: FONT, fontSize: `${Math.max(11, Math.round(Math.min(20 * s, titlePx * 0.3)))}px`, color: '#8a85a0', align: 'center', lineSpacing: 4 * s }).setOrigin(0.5, 0);
 
+    // Mode picker: the game is playable either as the shipped twelve mechanics
+    // or with every typed word invented on the spot.
+    const modeW = Math.min((W - 56) / 2, 118 * Math.max(s, 0.8));
+    const modeY = stackTop + modeH / 2;
+    const normal = this.modeButton(W / 2 - (modeW / 2 + 5), modeY, modeW, modeH, 'NORMAL', fs(13, 12), () => this.setMode(false));
+    const creativeBtn = this.modeButton(W / 2 + (modeW / 2 + 5), modeY, modeW, modeH, 'CREATIVE', fs(13, 12), () => this.setMode(true));
+    const caption = this.add.text(W / 2, modeY + modeH / 2 + 6, '', { fontFamily: FONT, fontSize: fs(12, 11), color: '#5d5873', align: 'center', wordWrap: { width: Math.min(W - 32, 420) } }).setOrigin(0.5, 0);
+    const refreshMode = () => {
+      const on = creativeMode() && !!aiProvider();
+      normal.select(!on);
+      creativeBtn.select(on);
+      caption.setText(
+        on ? 'any word you type becomes a new law of the world'
+        : !aiProvider() ? 'the twelve built-in mechanics · CREATIVE needs an AI key'
+        : 'the twelve built-in mechanics',
+      );
+    };
+    this.refreshMode = refreshMode;
+    refreshMode();
+
     const btnW = Math.min(W - 48, 240 * Math.max(s, 0.8));
-    const btnY = stackTop + btnH / 2;
+    const btnY = stackTop + modeH + capH + btnGap + btnH / 2;
     const step = btnH + btnGap;
     this.button(W / 2, btnY, btnW, btnH, 'PLAY', true, fs(18, 15), () => this.start(0));
     this.button(W / 2, btnY + step, btnW, btnH, 'HOW TO PLAY', false, fs(16, 13), () => this.howTo());
@@ -91,14 +114,37 @@ export class MenuScene extends Phaser.Scene {
     refreshAi();
     ai.on('pointerdown', () => {
       const k = window.prompt('Gemini (Google AI Studio) or OpenAI API key, stored only in this browser. Leave empty to turn AI off.', '');
-      if (k !== null) { setAIKey(k.trim()); refreshAi(); }
+      if (k !== null) { setAIKey(k.trim()); refreshAi(); refreshMode(); }
     });
+    this.askForKey = () => ai.emit('pointerdown');
 
     this.input.keyboard?.on('keydown-ENTER', () => this.start(0));
     this.input.keyboard?.on('keydown-SPACE', () => this.start(0));
 
     this.scale.on('resize', this.onResize);
     this.events.once('shutdown', () => this.scale.off('resize', this.onResize));
+  }
+
+  private refreshMode: () => void = () => {};
+  private askForKey: () => void = () => {};
+
+  /** Creative mode needs a key, so choosing it without one asks for the key first. */
+  private setMode(creative: boolean) {
+    if (creative && !aiProvider()) { this.askForKey(); if (!aiProvider()) return; }
+    setCreativeMode(creative);
+    this.refreshMode();
+  }
+
+  private modeButton(x: number, y: number, w: number, h: number, label: string, fontSize: string, onClick: () => void) {
+    const bg = this.add.rectangle(x, y, w, h, 0x1d1a29).setStrokeStyle(1, 0x34304a).setInteractive({ useHandCursor: true });
+    const t = this.add.text(x, y, label, { fontFamily: FONT, fontSize, color: '#5d5873' }).setOrigin(0.5);
+    bg.on('pointerdown', onClick);
+    return {
+      select(on: boolean) {
+        bg.setFillStyle(on ? 0x2a2440 : 0x1d1a29).setStrokeStyle(1, on ? 0xffd166 : 0x34304a);
+        t.setColor(on ? '#ffd166' : '#5d5873');
+      },
+    };
   }
 
   private start(levelIndex: number) {

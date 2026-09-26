@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "preview:lan": "vite preview --host",
     "itch": "npm run build && rm -f one-word-itch.zip && cd dist && zip -qr ../one-word-itch.zip .",
-    "test": "tsx tests/solutions.test.ts"
+    "test": "tsx tests/solutions.test.ts && tsx tests/creative.test.ts"
   },
   "dependencies": {
     "phaser": "^3.90.0"

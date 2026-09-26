@@ -1,11 +1,15 @@
-// Every word the world can understand maps to one of these fixed tokens.
-// Words typed by the player never become code — only one of these values.
+// Nouns are closed: they name things that actually exist in a level.
+// Verbs are open — a mechanic is whatever token a `MechanicSpec` is registered
+// under, so the world can learn words that were never shipped with the game.
+// Typed words still never become code: they become a spec, and only a spec.
 
 export const MECHANICS = [
   'DIE', 'HIDE', 'HEAL', 'BOUNCE', 'FREEZE', 'FOLLOW',
   'CHASE', 'FLEE', 'HELP', 'SLEEP', 'OPEN', 'ATTACK',
+  'SLIDE', 'TELEPORT', 'PUSH', 'SWAP',
 ] as const;
-export type Mechanic = (typeof MECHANICS)[number];
+export type BuiltinMechanic = (typeof MECHANICS)[number];
+export type Mechanic = BuiltinMechanic | (string & {});
 
 export const NOUNS = ['YOU', 'GUARD', 'EVERYONE', 'KEY', 'EXIT', 'RED', 'BLUE', 'PLATE', 'DOOR'] as const;
 export type Noun = (typeof NOUNS)[number];
@@ -42,7 +46,7 @@ export function editableSlots(rule: RuleDefinition): EditableSlot[] {
   return [...slots, ...(rule.editableParts ?? [])];
 }
 
-export function isMechanic(s: string): s is Mechanic {
+export function isMechanic(s: string): s is BuiltinMechanic {
   return (MECHANICS as readonly string[]).includes(s);
 }
 export function isNoun(s: string): s is Noun {

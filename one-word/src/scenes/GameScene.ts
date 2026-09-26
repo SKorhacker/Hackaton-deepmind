@@ -1,12 +1,15 @@
 import Phaser from 'phaser';
-import { COLORS, DEBUG_MODE, TILE } from '../config/GameConfig';
+import { COLORS, DEBUG_MODE, TILE, aiProvider, creativeMode } from '../config/GameConfig';
 import { LEVELS } from '../levels/levels';
 import { T, type LevelData, type Pos } from '../levels/LevelData';
 import type { Mechanic } from '../rules/RuleDefinition';
+import { registry } from '../rules/MechanicRegistry';
+import type { MechanicSpec, MotionMode } from '../rules/MechanicSpec';
 import { ruleTokens } from '../rules/RuleParser';
 import { RuleManager } from '../rules/RuleManager';
 import { normalizeWord } from '../rules/WordInterpreter';
 import { createInterpreter } from '../rules/createInterpreter';
+import { CreativeWordInterpreter } from '../rules/CreativeWordInterpreter';
 import { comboKey } from '../systems/Solver';
 import { World, type WorldEvent } from '../systems/World';
 import { RuleEditor } from '../ui/RuleEditor';
@@ -32,21 +35,37 @@ const MIN_ZOOM = 0.34;
 /** A pointer that travels further than this is a swipe, not a tap. */
 const SWIPE_PX = 26;
 
-// What a tile looks like under the current rule.
-const TILE_GLYPH: Partial<Record<Mechanic, string>> = {
-  DIE: '✕', ATTACK: '✕', HIDE: '◌', HEAL: '✚', BOUNCE: '⇡', FREEZE: '❄', SLEEP: 'z',
+// A tile and a guard are drawn from the mechanic's spec, so a word invented
+// mid-game looks like something even though nobody drew it.
+const ACTION_GLYPH: Record<string, string> = {
+  die: '✕', kill: '✕', freeze: '❄', push: '⇡', slide: '≋', teleport: '✦', swap: '⇄', unlock: '⚿', heal: '✚',
 };
+const STATUS_GLYPH: Record<string, string> = { hidden: '◌', phasing: '◇', safe: '⛨' };
 
-const GUARD_STYLE: Record<string, { color: number; icon: string }> = {
-  CHASE: { color: 0xff6a3d, icon: '!' },
-  ATTACK: { color: 0xff3d3d, icon: '!!' },
-  FOLLOW: { color: 0xff8fc8, icon: '♥' },
-  HELP: { color: 0x5ee6a0, icon: '✚' },
-  FLEE: { color: 0xffd166, icon: '?!' },
-  SLEEP: { color: 0x7c7896, icon: 'z' },
-  FREEZE: { color: 0x9fdcff, icon: '❄' },
-};
-const guardStyle = (v: string) => GUARD_STYLE[v] ?? { color: COLORS.guard, icon: '·' };
+function tileGlyph(verb: Mechanic | undefined): string {
+  const tile = registry.get(verb)?.tile;
+  if (!tile) return '';
+  const spec = registry.get(verb)!;
+  if (spec.glyph) return spec.glyph;
+  for (const a of tile.onEnter) if (ACTION_GLYPH[a.do]) return ACTION_GLYPH[a.do];
+  for (const s of tile.status) if (STATUS_GLYPH[s]) return STATUS_GLYPH[s];
+  return '';
+}
+
+const MOTION_ICON: Record<MotionMode, string> = { approach: '✚', trail: '♥', avoid: '?!', idle: 'z' };
+const hexColor = (spec: MechanicSpec | undefined, dflt: number) =>
+  spec?.color ? parseInt(spec.color.slice(1), 16) : dflt;
+
+function guardStyle(verb: Mechanic) {
+  const spec = registry.get(verb);
+  const m = spec?.motion;
+  return {
+    color: hexColor(spec, m ? COLORS.guard : 0x7c7896),
+    icon: !m ? 'z' : m.lethal ? '!' : MOTION_ICON[m.mode],
+  };
+}
+/** A guard whose word says nothing about moving just stands there (as SLEEP always did). */
+const isIdleVerb = (verb: Mechanic) => !!verb && !registry.get(verb)?.motion;
 
 const KEYMAP: Record<string, Pos> = {
   ArrowUp: { x: 0, y: -1 }, w: { x: 0, y: -1 }, W: { x: 0, y: -1 },
@@ -114,7 +133,13 @@ export class GameScene extends Phaser.Scene {
     editor.close();
     pad.onDir = (dir) => this.turn(dir);
 
-    this.rules = new RuleManager(this.level.rules, createInterpreter(), this.level.maxChanges ?? 1);
+    const ai = aiProvider();
+    this.rules = new RuleManager(
+      this.level.rules,
+      createInterpreter(),
+      this.level.maxChanges ?? 1,
+      ai && creativeMode() ? new CreativeWordInterpreter(ai) : null,
+    );
     this.world = new World(this.level, this.rules.rules);
 
     // The level is drawn at full tile size from (0,0); the camera zooms to fit it, so big
@@ -158,6 +183,17 @@ export class GameScene extends Phaser.Scene {
       window.removeEventListener('keydown', this.onKey);
       this.scale.off('resize', this.onResize);
       this.setAiNote('');
+    });
+
+    // Clicking a neighbouring tile moves there (clicking yourself waits), so the
+    // game is playable when the keyboard goes elsewhere — an embedded viewer, a
+    // touch screen, or right after typing a word.
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
+      if (editor.isOpen || complete.isOpen) return;
+      const dx = Math.floor((p.worldX - this.ox) / this.ts) - this.world.s.player.x;
+      const dy = Math.floor((p.worldY - this.oy) / this.ts) - this.world.s.player.y;
+      if (dx === 0 && dy === 0) this.turn(null);
+      else if (Math.abs(dx) + Math.abs(dy) === 1) this.turn({ x: dx, y: dy });
     });
 
     this.startTime = this.time.now;
@@ -301,9 +337,9 @@ export class GameScene extends Phaser.Scene {
     for (const gl of this.glyphs) {
       const verb = this.world.verbOn('YOU', gl.tile);
       const gverb = this.world.verbOn('GUARD', gl.tile);
-      gl.t.setText(verb ? TILE_GLYPH[verb] ?? '' : '');
+      gl.t.setText(tileGlyph(verb));
       // Small guard-coloured glyph when the tile treats guards differently.
-      gl.g.setText(gverb && gverb !== verb ? TILE_GLYPH[gverb] ?? '' : '');
+      gl.g.setText(gverb && gverb !== verb ? tileGlyph(gverb) : '');
     }
     for (const pl of this.plates) {
       const down = (s.player.x === pl.x && s.player.y === pl.y) || !!this.world.guardAt(pl.x, pl.y);
@@ -328,14 +364,15 @@ export class GameScene extends Phaser.Scene {
         v.icon.setText(`❄${g.frozen}`);
       } else {
         v.body.setFillStyle(st.color);
-        v.icon.setText(intent.lethal || intent.verb !== 'CHASE' ? st.icon : '·');
+        v.icon.setText(intent.lethal || !registry.get(intent.verb)?.motion?.lethal ? st.icon : '·');
       }
-      v.box.setAlpha(intent.verb === 'SLEEP' ? 0.75 : 1);
+      v.box.setAlpha(isIdleVerb(intent.verb) ? 0.75 : 1);
       if (animate) this.tweens.add({ targets: v.box, x: this.px(g.x), y: this.py(g.y), duration: 130, ease: 'Quad.easeOut' });
       else v.box.setPosition(this.px(g.x), this.py(g.y));
-      if (intent.verb === 'SLEEP' && v.lastVerb !== 'SLEEP') {
+      const idle = isIdleVerb(intent.verb);
+      if (idle && !isIdleVerb(v.lastVerb)) {
         this.tweens.add({ targets: v.icon, y: -40, alpha: 0.4, duration: 900, yoyo: true, repeat: -1 });
-      } else if (intent.verb !== 'SLEEP' && v.lastVerb === 'SLEEP') {
+      } else if (!idle && isIdleVerb(v.lastVerb)) {
         this.tweens.killTweensOf(v.icon); v.icon.setY(-34).setAlpha(1);
       }
       v.lastVerb = intent.verb;
@@ -454,7 +491,9 @@ export class GameScene extends Phaser.Scene {
     this.locked = true;
     this.time.delayedCall(125, () => { this.locked = false; });
     const hops: Pos[] = [];
-    for (const e of ev) if (e.type === 'move' || e.type === 'bounce') hops.push({ x: e.x, y: e.y });
+    for (const e of ev) {
+      if (e.type === 'move' || e.type === 'bounce' || e.type === 'slide' || e.type === 'teleport' || e.type === 'pushed' || e.type === 'swap') hops.push({ x: e.x, y: e.y });
+    }
     this.effects(ev);
     this.sync(true, hops);
     if (this.world.s.dead) this.onDeath();
@@ -466,6 +505,12 @@ export class GameScene extends Phaser.Scene {
       switch (e.type) {
         case 'move': sfx.move(); break;
         case 'bounce': sfx.bounce(); this.burst(e.x, e.y, COLORS.red, 8); break;
+        case 'slide': this.burst(e.x, e.y, COLORS.ice, 3); break;
+        case 'teleport': sfx.teleport(); this.burst(e.x, e.y, COLORS.blue, 16, true); break;
+        case 'pushed': sfx.push(); this.burst(e.x, e.y, 0xc58cff, 8); this.floatText(e, 'SHOVED!', '#c58cff'); break;
+        case 'swap': sfx.teleport(); this.burst(e.x, e.y, 0xc58cff, 12); this.floatText(e, 'SWAP!', '#c58cff'); break;
+        case 'guardSlide': this.burst(e.x, e.y, COLORS.ice, 3); break;
+        case 'guardTeleport': sfx.teleport(); this.burst(e.x, e.y, COLORS.blue, 12, true); break;
         case 'hide': sfx.hide(); this.floatText(this.world.s.player, 'HIDDEN', '#b9b4cc'); break;
         case 'heal': sfx.heal(); this.burst(this.world.s.player.x, this.world.s.player.y, COLORS.heal, 12, true); break;
         case 'freeze': sfx.freeze(); this.burst(this.world.s.player.x, this.world.s.player.y, COLORS.ice, 10); break;
@@ -608,7 +653,11 @@ export class GameScene extends Phaser.Scene {
       }
     }
     if (res.token === this.rules.tokenAt(slot)) {
-      return { ok: false as const, message: "THAT'S ALREADY THE RULE." };
+      return {
+        ok: false as const,
+        message: `THE RULE ALREADY SAYS ${res.token} — NOTHING WOULD CHANGE.`,
+        hint: 'TRY A WORD THAT MEANS SOMETHING ELSE',
+      };
     }
     // ONE WORD: rewriting this slot restores the oldest rewritten one if over the level's limit.
     this.activeWord = { word: normalizeWord(raw) ?? raw.trim(), token: res.token, ai: res.source === 'ai' };
