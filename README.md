@@ -13,10 +13,8 @@ Type `hide` and the red floor stops killing you: it hides you from the guard ins
 it launches you across. Type `hibernate`, `levitate` or `dormir` and **Gemini** works out what you mean —
 or, in Creative mode, invents a brand-new law of physics for the word you typed.
 
-> **📸 Screenshot to add — `docs/screenshots/hero.png`**
-> The moment of a rewrite: Level 3 with the rule bar reading **GUARD [HELPS] YOU** (the rewritten word
-> highlighted in yellow), the green guard walking towards the yellow pressure plate along its dotted path,
-> and the "RULE REWRITTEN" flash in the middle of the grid.
+<img width="3012" height="1562" alt="image" src="https://github.com/user-attachments/assets/f5b862df-bf35-4415-9bb7-ca50b7e95b58" />
+
 
 ---
 
@@ -35,7 +33,7 @@ npm run dev          # open the address it prints
 To use Gemini, put a [Google AI Studio](https://aistudio.google.com/apikey) key in `one-word/.env.local`
 (`VITE_GEMINI_API_KEY=...`), or paste it on the title screen. The game is fully playable without a key.
 
-![Uploading image.png…]()
+<img width="3016" height="1640" alt="image" src="https://github.com/user-attachments/assets/6d690851-7fde-4757-ab52-4d8d0e6b7a83" />
 
 
 ---
@@ -53,9 +51,8 @@ Some levels allow several editable words but still only **one change at a time**
 *when* you rewrite matters as much as *what* you write (lure the guard onto the red, *then* make red deadly
 for guards).
 
-> **📸 Screenshot to add — `docs/screenshots/multi-rule.png`**
-> Level 7 "TRAP" with its three rules stacked in the rule bar (GUARD [CHASES] YOU · [EVERYONE] DIES ON RED ·
-> YOU [FREEZE] ON BLUE), the red island with the pressure plate inside it, the blue strip and the guard.
+<img width="3016" height="1640" alt="image" src="https://github.com/user-attachments/assets/33df27ae-0fab-41eb-9f41-abbbb36c963a" />
+
 
 ### 2. Gemini understands your word
 
@@ -73,10 +70,6 @@ this level, and answers with structured output (a JSON schema restricted to thos
 | `xqzv` | anything | nothing — "the world doesn't understand that word" |
 
 The short explanation Gemini gives is shown under the grid, so the player sees *how* the world read them.
-
-> **📸 Screenshot to add — `docs/screenshots/gemini-note.png`**
-> Level 2 right after typing `hibernate`: the rule bar reads **GUARD [SLEEPS]**, the guard is grey with a
-> floating "z", and the line under the grid reads *AI understood "hibernate" as SLEEP — …*.
 
 ### 3. Creative mode: Gemini invents new physics
 
@@ -96,9 +89,7 @@ capped, a fleeing guard can never be lethal, and an invented word can never over
 hallucination becomes a dull tile, not a crash. The sixteen shipped mechanics are written in exactly the same
 format, with no special privileges.
 
-> **📸 Screenshot to add — `docs/screenshots/creative.png`**
-> Creative mode, Level 1: the rule bar reads **YOU [LEVITATE] ON RED**, the player floating across the red
-> band, and Gemini's note *"You float above red tiles unharmed"* under the grid.
+<img width="3806" height="1640" alt="image" src="https://github.com/user-attachments/assets/a12f3556-dcac-4b2e-a118-5ae8206dab14" />
 
 ---
 
@@ -114,10 +105,8 @@ Click **MAKE A LEVEL** on the title screen to open the Studio, a visual level ed
 4. **SAVE** writes the level as one small file into `one-word/src/levels/definitions/`, and it appears in the
    game immediately. There is no list to register it in.
 
-> **📸 Screenshot to add — `docs/screenshots/studio.png`**
-> The Studio with a half-painted map on the left (red tiles, a guard, a plate and a door), the rule editor
-> on the right with a ticked "WORDS PLAYERS MAY CHANGE" box and its chips, and the TEST LEVEL result
-> "Solvable with: HIDE, HEAL, BOUNCE".
+![Uploading image.png…]()
+
 
 ### Built for a community
 
