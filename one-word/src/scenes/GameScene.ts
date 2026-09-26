@@ -28,7 +28,7 @@ let wordbook: WordBook;
 // A tile and a guard are drawn from the mechanic's spec, so a word invented
 // mid-game looks like something even though nobody drew it.
 const ACTION_GLYPH: Record<string, string> = {
-  die: '✕', kill: '✕', freeze: '❄', push: '⇡', teleport: '✦', swap: '⇄', unlock: '⚿', heal: '✚',
+  die: '✕', kill: '✕', freeze: '❄', push: '⇡', slide: '≋', teleport: '✦', swap: '⇄', unlock: '⚿', heal: '✚',
 };
 const STATUS_GLYPH: Record<string, string> = { hidden: '◌', phasing: '◇', safe: '⛨' };
 
@@ -407,7 +407,9 @@ export class GameScene extends Phaser.Scene {
     this.locked = true;
     this.time.delayedCall(125, () => { this.locked = false; });
     const hops: Pos[] = [];
-    for (const e of ev) if (e.type === 'move' || e.type === 'bounce') hops.push({ x: e.x, y: e.y });
+    for (const e of ev) {
+      if (e.type === 'move' || e.type === 'bounce' || e.type === 'slide' || e.type === 'teleport' || e.type === 'pushed' || e.type === 'swap') hops.push({ x: e.x, y: e.y });
+    }
     this.effects(ev);
     this.sync(true, hops);
     if (this.world.s.dead) this.onDeath();
@@ -419,6 +421,12 @@ export class GameScene extends Phaser.Scene {
       switch (e.type) {
         case 'move': sfx.move(); break;
         case 'bounce': sfx.bounce(); this.burst(e.x, e.y, COLORS.red, 8); break;
+        case 'slide': this.burst(e.x, e.y, COLORS.ice, 3); break;
+        case 'teleport': sfx.teleport(); this.burst(e.x, e.y, COLORS.blue, 16, true); break;
+        case 'pushed': sfx.push(); this.burst(e.x, e.y, 0xc58cff, 8); this.floatText(e, 'SHOVED!', '#c58cff'); break;
+        case 'swap': sfx.teleport(); this.burst(e.x, e.y, 0xc58cff, 12); this.floatText(e, 'SWAP!', '#c58cff'); break;
+        case 'guardSlide': this.burst(e.x, e.y, COLORS.ice, 3); break;
+        case 'guardTeleport': sfx.teleport(); this.burst(e.x, e.y, COLORS.blue, 12, true); break;
         case 'hide': sfx.hide(); this.floatText(this.world.s.player, 'HIDDEN', '#b9b4cc'); break;
         case 'heal': sfx.heal(); this.burst(this.world.s.player.x, this.world.s.player.y, COLORS.heal, 12, true); break;
         case 'freeze': sfx.freeze(); this.burst(this.world.s.player.x, this.world.s.player.y, COLORS.ice, 10); break;

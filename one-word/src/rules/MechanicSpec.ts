@@ -9,20 +9,24 @@
 import type { Noun } from './RuleDefinition';
 
 /** Where an action or a motion points. OBJECT = whatever noun the rule names. */
-export const TARGETS = ['OBJECT', 'YOU', 'GUARD', 'KEY', 'EXIT', 'RED', 'BLUE', 'PLATE', 'DOOR', 'START'] as const;
+export const TARGETS = ['OBJECT', 'YOU', 'GUARD', 'KEY', 'EXIT', 'RED', 'BLUE', 'PLATE', 'DOOR', 'START', 'TWIN'] as const;
 export type Target = (typeof TARGETS)[number];
 
-export const ACTIONS = ['die', 'kill', 'freeze', 'push', 'teleport', 'swap', 'unlock', 'heal', 'nothing'] as const;
+export const ACTIONS = ['die', 'kill', 'freeze', 'push', 'slide', 'teleport', 'swap', 'unlock', 'heal', 'nothing'] as const;
 export type ActionKind = (typeof ACTIONS)[number];
 
 /** One thing that happens to the actor standing on the tile. */
 export interface Action {
   do: ActionKind;
-  /** `freeze`: turns lost (1-5). `push`: tiles slid along the entry direction (1-8). */
+  /** `freeze`: turns lost (1-5). `push`: tiles moved along the entry direction (1-8); `slide` keeps going. */
   amount?: number;
   /** `teleport` destination / `kill` and `swap` victim. */
   target?: Target;
 }
+
+/** What walking into a guard does, for words about touching rather than tiles or routes. */
+export const CONTACTS = ['push', 'swap'] as const;
+export type Contact = (typeof CONTACTS)[number];
 
 /** Lasting states granted while the actor stands on the tile. */
 export const STATUSES = ['hidden', 'phasing', 'safe'] as const;
@@ -55,6 +59,8 @@ export interface MechanicSpec {
   tile?: TileBehavior;
   /** How a guard governed by this word behaves. Absent = it stands still. */
   motion?: MotionBehavior;
+  /** What happens when this word's actor walks into someone. Absent = they block each other. */
+  contact?: Contact;
   /** One character drawn on tiles running this mechanic. */
   glyph?: string;
   /** `#rrggbb` used for guards running this mechanic. */
@@ -139,7 +145,10 @@ export function parseSpec(token: string, raw: unknown): MechanicSpec | null {
     }
   }
 
-  if (!spec.tile && !spec.motion) return null;
+  const contact = oneOf(CONTACTS, o.contact);
+  if (contact) spec.contact = contact;
+
+  if (!spec.tile && !spec.motion && !spec.contact) return null;
   if (typeof o.glyph === 'string' && o.glyph.trim()) spec.glyph = [...o.glyph.trim()][0];
   if (typeof o.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(o.color)) spec.color = o.color;
   if (typeof o.note === 'string') spec.note = o.note.slice(0, 90);
@@ -150,7 +159,7 @@ export function parseSpec(token: string, raw: unknown): MechanicSpec | null {
 export const SPEC_JSON_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['token', 'tile', 'motion', 'glyph', 'color', 'note'],
+  required: ['token', 'tile', 'motion', 'contact', 'glyph', 'color', 'note'],
   properties: {
     token: { type: 'string', description: 'The word in uppercase, A-Z only, 2-16 letters.' },
     tile: {
@@ -169,7 +178,7 @@ export const SPEC_JSON_SCHEMA = {
             properties: {
               do: { type: 'string', enum: [...ACTIONS] },
               amount: { type: ['integer', 'null'], description: 'freeze: turns 1-5. push: tiles 1-8. Otherwise null.' },
-              target: { type: ['string', 'null'], enum: [...TARGETS, null] },
+              target: { type: ['string', 'null'], enum: [...TARGETS, null], description: 'TWIN = the next tile of the same colour, so a pair of tiles becomes a portal.' },
             },
           },
         },
@@ -193,6 +202,7 @@ export const SPEC_JSON_SCHEMA = {
         steps: { type: 'integer', description: 'Tiles per turn, 1-3.' },
       },
     },
+    contact: { type: ['string', 'null'], enum: [...CONTACTS, null], description: 'What walking into someone does: push shoves them, swap trades places. null for most words.' },
     glyph: { type: ['string', 'null'], description: 'One symbol drawn on the tile.' },
     color: { type: ['string', 'null'], description: '#rrggbb for actors obeying the word.' },
     note: { type: 'string', description: 'At most 8 playful words explaining the reading.' },

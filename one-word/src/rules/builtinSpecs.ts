@@ -1,7 +1,7 @@
 import { MECHANICS } from './RuleDefinition';
 import type { MechanicSpec } from './MechanicSpec';
 
-// The twelve shipped mechanics, written in the same DSL a typed word produces.
+// The sixteen shipped mechanics, written in the same DSL a typed word produces.
 // They are ordinary specs with no privileges: the simulation cannot tell them
 // apart from a word invented at runtime.
 
@@ -13,6 +13,9 @@ export const BUILTIN_SPECS: MechanicSpec[] = [
   { token: 'FREEZE', glyph: '❄', color: '#9fdcff', tile: { onEnter: [{ do: 'freeze', amount: 2 }], status: [] } },
   { token: 'SLEEP', glyph: 'z', color: '#7c7896', tile: { onEnter: [{ do: 'freeze', amount: 3 }], status: [] } },
   { token: 'OPEN', tile: { onEnter: [{ do: 'unlock' }], status: [] } },
+  { token: 'SLIDE', glyph: '≋', tile: { onEnter: [{ do: 'slide' }], status: [] } },
+  { token: 'TELEPORT', glyph: '◎', tile: { onEnter: [{ do: 'teleport', target: 'TWIN' }], status: [] } },
+  { token: 'SWAP', glyph: '⇄', color: '#c58cff', contact: 'swap' },
 
   { token: 'CHASE', color: '#ff6a3d', motion: { mode: 'approach', target: 'OBJECT', lethal: true, steps: 1 } },
   {
@@ -25,6 +28,8 @@ export const BUILTIN_SPECS: MechanicSpec[] = [
   // HELP ignores the noun in the sentence: helpers look for a plate to stand on,
   // and only tag along when there is none.
   { token: 'HELP', color: '#5ee6a0', motion: { mode: 'approach', target: 'PLATE', fallback: 'OBJECT', lethal: false, steps: 1 } },
+  // PUSH is about touching, not tiles: it shoves whoever it walks into.
+  { token: 'PUSH', glyph: '»', color: '#c58cff', contact: 'push', motion: { mode: 'approach', target: 'OBJECT', lethal: false, steps: 1 } },
 ];
 
 // A word with no tile behaviour is an inert tile, and one with no motion stands
