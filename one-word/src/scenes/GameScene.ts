@@ -1,12 +1,15 @@
 import Phaser from 'phaser';
-import { COLORS, DEBUG_MODE, OPENAI_MODEL, TILE, openAIKey } from '../config/GameConfig';
+import { COLORS, DEBUG_MODE, OPENAI_MODEL, TILE, dynamicMode, openAIKey } from '../config/GameConfig';
 import { LEVELS } from '../levels/levels';
 import { T, type LevelData, type Pos } from '../levels/LevelData';
 import type { Mechanic } from '../rules/RuleDefinition';
+import { registry } from '../rules/MechanicRegistry';
+import type { MechanicSpec, MotionMode } from '../rules/MechanicSpec';
 import { ruleTokens } from '../rules/RuleParser';
 import { RuleManager } from '../rules/RuleManager';
 import { normalizeWord } from '../rules/WordInterpreter';
 import { LLMWordInterpreter } from '../rules/LLMWordInterpreter';
+import { DynamicWordInterpreter } from '../rules/DynamicWordInterpreter';
 import { World, type WorldEvent } from '../systems/World';
 import { RuleEditor } from '../ui/RuleEditor';
 import { LevelCompleteUI } from '../ui/LevelCompleteUI';
@@ -21,21 +24,37 @@ let editor: RuleEditor;
 let complete: LevelCompleteUI;
 let wordbook: WordBook;
 
-// What a tile looks like under the current rule.
-const TILE_GLYPH: Partial<Record<Mechanic, string>> = {
-  DIE: '✕', ATTACK: '✕', HIDE: '◌', HEAL: '✚', BOUNCE: '⇡', FREEZE: '❄', SLEEP: 'z',
+// A tile and a guard are drawn from the mechanic's spec, so a word invented
+// mid-game looks like something even though nobody drew it.
+const ACTION_GLYPH: Record<string, string> = {
+  die: '✕', kill: '✕', freeze: '❄', push: '⇡', teleport: '✦', swap: '⇄', unlock: '⚿', heal: '✚',
 };
+const STATUS_GLYPH: Record<string, string> = { hidden: '◌', phasing: '◇', safe: '⛨' };
 
-const GUARD_STYLE: Record<string, { color: number; icon: string }> = {
-  CHASE: { color: 0xff6a3d, icon: '!' },
-  ATTACK: { color: 0xff3d3d, icon: '!!' },
-  FOLLOW: { color: 0xff8fc8, icon: '♥' },
-  HELP: { color: 0x5ee6a0, icon: '✚' },
-  FLEE: { color: 0xffd166, icon: '?!' },
-  SLEEP: { color: 0x7c7896, icon: 'z' },
-  FREEZE: { color: 0x9fdcff, icon: '❄' },
-};
-const guardStyle = (v: string) => GUARD_STYLE[v] ?? { color: COLORS.guard, icon: '·' };
+function tileGlyph(verb: Mechanic | undefined): string {
+  const tile = registry.get(verb)?.tile;
+  if (!tile) return '';
+  const spec = registry.get(verb)!;
+  if (spec.glyph) return spec.glyph;
+  for (const a of tile.onEnter) if (ACTION_GLYPH[a.do]) return ACTION_GLYPH[a.do];
+  for (const s of tile.status) if (STATUS_GLYPH[s]) return STATUS_GLYPH[s];
+  return '';
+}
+
+const MOTION_ICON: Record<MotionMode, string> = { approach: '✚', trail: '♥', avoid: '?!', idle: 'z' };
+const hexColor = (spec: MechanicSpec | undefined, dflt: number) =>
+  spec?.color ? parseInt(spec.color.slice(1), 16) : dflt;
+
+function guardStyle(verb: Mechanic) {
+  const spec = registry.get(verb);
+  const m = spec?.motion;
+  return {
+    color: hexColor(spec, m ? COLORS.guard : 0x7c7896),
+    icon: !m ? 'z' : m.lethal ? '!' : MOTION_ICON[m.mode],
+  };
+}
+/** A guard whose word says nothing about moving just stands there (as SLEEP always did). */
+const isIdleVerb = (verb: Mechanic) => !!verb && !registry.get(verb)?.motion;
 
 const KEYMAP: Record<string, Pos> = {
   ArrowUp: { x: 0, y: -1 }, w: { x: 0, y: -1 }, W: { x: 0, y: -1 },
@@ -101,7 +120,11 @@ export class GameScene extends Phaser.Scene {
     editor.close();
 
     const key = openAIKey();
-    this.rules = new RuleManager(this.level.rules, key ? new LLMWordInterpreter(key, OPENAI_MODEL) : null);
+    this.rules = new RuleManager(
+      this.level.rules,
+      key ? new LLMWordInterpreter(key, OPENAI_MODEL) : null,
+      key && dynamicMode() ? new DynamicWordInterpreter(key, OPENAI_MODEL) : null,
+    );
     this.world = new World(this.level, this.rules.rules);
 
     const { width: W, height: H } = this.scale;
@@ -253,9 +276,9 @@ export class GameScene extends Phaser.Scene {
     for (const gl of this.glyphs) {
       const verb = this.world.verbOn('YOU', gl.tile);
       const gverb = this.world.verbOn('GUARD', gl.tile);
-      gl.t.setText(verb ? TILE_GLYPH[verb] ?? '' : '');
+      gl.t.setText(tileGlyph(verb));
       // Small guard-coloured glyph when the tile treats guards differently.
-      gl.g.setText(gverb && gverb !== verb ? TILE_GLYPH[gverb] ?? '' : '');
+      gl.g.setText(gverb && gverb !== verb ? tileGlyph(gverb) : '');
     }
     for (const pl of this.plates) {
       const down = (s.player.x === pl.x && s.player.y === pl.y) || !!this.world.guardAt(pl.x, pl.y);
@@ -280,14 +303,15 @@ export class GameScene extends Phaser.Scene {
         v.icon.setText(`❄${g.frozen}`);
       } else {
         v.body.setFillStyle(st.color);
-        v.icon.setText(intent.lethal || intent.verb !== 'CHASE' ? st.icon : '·');
+        v.icon.setText(intent.lethal || !registry.get(intent.verb)?.motion?.lethal ? st.icon : '·');
       }
-      v.box.setAlpha(intent.verb === 'SLEEP' ? 0.75 : 1);
+      v.box.setAlpha(isIdleVerb(intent.verb) ? 0.75 : 1);
       if (animate) this.tweens.add({ targets: v.box, x: this.px(g.x), y: this.py(g.y), duration: 130, ease: 'Quad.easeOut' });
       else v.box.setPosition(this.px(g.x), this.py(g.y));
-      if (intent.verb === 'SLEEP' && v.lastVerb !== 'SLEEP') {
+      const idle = isIdleVerb(intent.verb);
+      if (idle && !isIdleVerb(v.lastVerb)) {
         this.tweens.add({ targets: v.icon, y: -40, alpha: 0.4, duration: 900, yoyo: true, repeat: -1 });
-      } else if (intent.verb !== 'SLEEP' && v.lastVerb === 'SLEEP') {
+      } else if (!idle && isIdleVerb(v.lastVerb)) {
         this.tweens.killTweensOf(v.icon); v.icon.setY(-34).setAlpha(1);
       }
       v.lastVerb = intent.verb;

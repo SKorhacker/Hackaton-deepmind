@@ -25,6 +25,30 @@ Controls: **WASD / arrows** move · **Space** wait · **Enter / E** edit the wor
 
 The game is fully playable without AI.
 
+### Dynamic mode (invented mechanics)
+
+With an AI key, click **"Dynamic words"** on the title screen. Verb slots then stop being a menu of twelve
+mechanics: the model answers with a *mechanic spec* — data describing what a tile does and how an actor moves —
+and the simulation runs it. `warp`, `melt`, `ghost` and `shadow` become real laws of the world although nobody
+implemented them.
+
+The spec is the safety boundary. A mechanic is:
+
+```ts
+{ tile:   { onEnter: [{ do: 'teleport', target: 'EXIT' }], status: ['phasing'] },
+  motion: { mode: 'trail', target: 'OBJECT', lethal: false, steps: 2 } }
+```
+
+`do` is one of nine verbs the engine implements (`die`, `kill`, `freeze`, `push`, `teleport`, `swap`, `unlock`,
+`heal`, `nothing`), `mode` one of four ways to move. Model output is parsed by `parseSpec`, which drops unknown
+fields, clamps numbers, caps action lists and refuses specs that say nothing at all — so a hallucination becomes
+a dull tile, never a crash. Nothing is compiled and nothing is evaluated: no `eval`, no generated code, and a
+typed word can never redefine a mechanic the game ships with. Each accepted word is cached for the session, so
+the world keeps its mind and stays deterministic enough for the solver.
+
+The twelve original mechanics are written in the same DSL (`src/rules/builtinSpecs.ts`) and get no privileges:
+`npm test` still proves the shipped levels have exactly the documented solutions, through the spec interpreter.
+
 ### OpenAI key
 
 - **Dev:** put `VITE_OPENAI_API_KEY=...` in `.env.local` (gitignored). It is only read in dev mode and is **not**
@@ -43,11 +67,13 @@ The game is fully playable without AI.
 | 4 | GUARD CHASES **YOU** | KEY |
 | 5 | GUARD **CHASES** YOU · YOU DIE ON RED | HELP, FLEE, FOLLOW |
 
-`npm test` checks this table against every allowed word by exhaustive search.
+`npm test` checks this table against every allowed word by exhaustive search, then checks that invented
+mechanics behave (`tests/dynamic.test.ts`).
 
 ## Structure
 
-- `src/systems/World.ts`: deterministic turn-based simulation (no Phaser), rules → behavior
+- `src/systems/World.ts`: deterministic turn-based simulation (no Phaser), specs → behavior
+- `src/rules/MechanicSpec.ts`: the mechanic DSL, its validator and the JSON schema the model answers with
 - `src/rules/`: rule types, sentence rendering, interpreters, `RuleManager`
 - `src/levels/levels.ts`: ASCII level maps
 - `src/scenes/`: Phaser menu + game rendering

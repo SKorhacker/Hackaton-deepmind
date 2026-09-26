@@ -1,4 +1,5 @@
 import type { Mechanic, RuleDefinition, RulePart } from './RuleDefinition';
+import { registry } from './MechanicRegistry';
 
 // Turns a rule into display tokens: "GUARD CHASES [YOU]".
 
@@ -8,7 +9,8 @@ export interface RuleToken {
   editable: boolean;
 }
 
-const INTRANSITIVE: Mechanic[] = ['SLEEP', 'FREEZE', 'DIE', 'HIDE', 'HEAL', 'BOUNCE', 'OPEN'];
+/** A word takes an object only if it says something about moving towards or away from one. */
+const takesObject = (verb: Mechanic) => !!registry.get(verb)?.motion;
 
 export function conjugate(verb: Mechanic, subject: string): string {
   if (subject === 'YOU') return verb;
@@ -27,7 +29,7 @@ export function ruleTokens(rule: RuleDefinition): RuleToken[] {
   const ed = (p: RulePart) => rule.editablePart === p;
   t.push({ text: rule.subject, part: 'subject', editable: ed('subject') });
   t.push({ text: conjugate(rule.verb, rule.subject), part: 'verb', editable: ed('verb') });
-  if (rule.object && (ed('object') || !INTRANSITIVE.includes(rule.verb))) {
+  if (rule.object && (ed('object') || takesObject(rule.verb))) {
     t.push({ text: rule.object, part: 'object', editable: ed('object') });
   }
   if (rule.condition) {

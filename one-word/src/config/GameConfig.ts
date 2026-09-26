@@ -37,3 +37,11 @@ export function setOpenAIKey(key: string) {
   try { localStorage.setItem('oneword_openai_key', key); } catch { /* storage blocked */ }
 }
 export const OPENAI_MODEL = (import.meta.env.VITE_OPENAI_MODEL as string | undefined) || 'gpt-4.1-mini';
+
+/** Dynamic mode: verb slots accept any word the model can turn into a mechanic. */
+export function dynamicMode(): boolean {
+  try { return localStorage.getItem('oneword_dynamic') === '1'; } catch { return false; }
+}
+export function setDynamicMode(on: boolean) {
+  try { localStorage.setItem('oneword_dynamic', on ? '1' : '0'); } catch { /* storage blocked */ }
+}

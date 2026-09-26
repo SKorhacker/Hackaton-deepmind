@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { COLORS, OPENAI_MODEL, openAIKey, setOpenAIKey } from '../config/GameConfig';
+import { COLORS, OPENAI_MODEL, dynamicMode, openAIKey, setDynamicMode, setOpenAIKey } from '../config/GameConfig';
 import { LEVELS } from '../levels/levels';
 import { session } from '../config/Session';
 
@@ -46,7 +46,21 @@ export class MenuScene extends Phaser.Scene {
     refreshAi();
     ai.on('pointerdown', () => {
       const k = window.prompt('OpenAI API key (stored only in this browser). Leave empty to turn AI off.', '');
-      if (k !== null) { setOpenAIKey(k.trim()); refreshAi(); }
+      if (k !== null) { setOpenAIKey(k.trim()); refreshAi(); refreshDyn(); }
+    });
+
+    // Dynamic mode: verbs stop being a menu — the model invents the mechanic itself.
+    const dyn = this.add.text(14, H - 12, '', { fontFamily: FONT, fontSize: '11px', color: '#5d5873' }).setOrigin(0, 1).setInteractive({ useHandCursor: true });
+    const refreshDyn = () => dyn.setText(
+      !openAIKey() ? 'Dynamic words: needs an AI key'
+      : dynamicMode() ? 'Dynamic words: ON · any verb becomes a real rule'
+      : 'Dynamic words: OFF · click for invented mechanics',
+    );
+    refreshDyn();
+    dyn.on('pointerdown', () => {
+      if (!openAIKey()) return;
+      setDynamicMode(!dynamicMode());
+      refreshDyn();
     });
 
     this.input.keyboard?.on('keydown-ENTER', () => this.start(0));
