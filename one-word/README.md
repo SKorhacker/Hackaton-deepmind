@@ -28,8 +28,10 @@ The game is fully playable without AI.
 
 ### Dynamic mode (invented mechanics)
 
-With an AI key, click **"Dynamic words"** on the title screen. Verb slots then stop being a menu of twelve
-mechanics: the model answers with a *mechanic spec* — data describing what a tile does and how an actor moves —
+The title screen offers two modes next to **PLAY**: **NORMAL** (the twelve shipped mechanics, works with AI off)
+and **DYNAMIC**, which needs an AI key. In dynamic mode verb slots stop being a menu and the dictionary is
+skipped entirely — `vanish` no longer collapses onto `HIDE`, it becomes `VANISH` with a meaning of its own:
+the model answers with a *mechanic spec* — data describing what a tile does and how an actor moves —
 and the simulation runs it. `warp`, `melt`, `ghost` and `shadow` become real laws of the world although nobody
 implemented them.
 
