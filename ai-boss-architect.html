@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>The Architect</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0010; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; gap: 16px; font-family: ui-monospace, Menlo, monospace; color: #ccc; }
+canvas { image-rendering: pixelated; image-rendering: crisp-edges; }
+#brain { width: 320px; height: min(92vh, 720px); display: flex; flex-direction: column; gap: 10px; background: #120a1e; border: 1px solid #2a1f3d; border-radius: 8px; padding: 12px; font-size: 12px; }
+#brain h2 { font-size: 13px; color: #f44; letter-spacing: 1px; display: flex; justify-content: space-between; align-items: center; }
+#gstatus { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: #222; color: #888; }
+#gstatus.on { background: #033; color: #0ff; }
+#gstatus.busy { background: #330; color: #ff0; }
+#gstatus.err { background: #300; color: #f66; }
+#keyrow { display: flex; flex-direction: column; gap: 6px; }
+#keyrow input { background: #0a0612; border: 1px solid #333; color: #ddd; padding: 5px 6px; border-radius: 4px; font: inherit; }
+#keyrow button { background: #f44; color: #000; border: 0; padding: 5px; border-radius: 4px; font: inherit; font-weight: bold; cursor: pointer; }
+#keyrow.hidden { display: none; }
+.label { color: #666; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 3px; }
+#taunt { color: #fff; font-size: 13px; background: #2a0a0a; border-left: 3px solid #f44; padding: 8px; border-radius: 4px; min-height: 36px; }
+#now { color: #ff0; }
+#next { color: #888; }
+.tag { font-size: 9px; padding: 1px 4px; border-radius: 3px; margin-left: 4px; vertical-align: middle; }
+.tag.gem { background: #f44; color: #000; }
+.tag.built { background: #333; color: #aaa; }
+#thoughts { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.thought { color: #9ab; line-height: 1.4; border-left: 2px solid #334; padding-left: 8px; }
+.thought:first-child { color: #cde; border-color: #f44; }
+.thought .t { color: #555; font-size: 10px; }
+.thought b { color: #f88; }
+#report { color: #ddd; line-height: 1.5; white-space: pre-wrap; }
+#changekey { color: #555; font-size: 10px; cursor: pointer; text-decoration: underline; background: none; border: 0; text-align: left; }
+</style>
+</head>
+<body>
+<canvas id="display"></canvas>
+<canvas id="buffer" style="display:none"></canvas>
+<div id="brain">
+  <h2>THE ARCHITECT <span id="gstatus">offline</span></h2>
+  <div id="keyrow">
+    <input id="gkey" type="password" placeholder="Gemini API key" autocomplete="off">
+    <input id="gmodel" type="text" placeholder="model" value="gemini-2.5-flash">
+    <button id="gsave">Connect</button>
+    <div style="color:#555;font-size:10px">Key is stored only in this browser (localStorage). Without a key the boss uses its built-in attack library.</div>
+  </div>
+  <div><div class="label">Says</div><div id="taunt">…</div></div>
+  <div><div class="label">Now firing</div><div id="now">—</div></div>
+  <div><div class="label">Next attack</div><div id="next">—</div></div>
+  <div class="label">Design notes</div>
+  <div id="thoughts"></div>
+  <button id="changekey">change API key</button>
+</div>
+<script>
+// ============ PIXEL ART SETUP ============
+const IW = 300, IH = 400;
+const display = document.getElementById('display');
+const buffer = document.getElementById('buffer');
+buffer.width = IW; buffer.height = IH;
+const dctx = display.getContext('2d');
+const ctx = buffer.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+
+let scale = 1;
+function resize() {
+  scale = Math.min(Math.floor((window.innerWidth - 360) / IW), Math.floor(window.innerHeight / IH));
+  scale = Math.max(1, scale);
+  display.width = IW * scale; display.height = IH * scale;
+  dctx.imageSmoothingEnabled = false;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ============ INPUT ============
+const keys = {};
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  keys[e.key.length === 1 ? e.key.toLowerCase() : e.key] = true;
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
+});
+window.addEventListener('keyup', e => { keys[e.key.length === 1 ? e.key.toLowerCase() : e.key] = false; });
+
+// ============ PIXEL DRAWING ============
+function pxRect(x, y, w, h, c) { ctx.fillStyle = c; ctx.fillRect(Math.floor(x), Math.floor(y), w, h); }
+function pxBorder(x, y, w, h, c) { ctx.strokeStyle = c; ctx.lineWidth = 1; ctx.strokeRect(Math.floor(x) + 0.5, Math.floor(y) + 0.5, w - 1, h - 1); }
+function pxText(str, x, y, c, size = 7) { ctx.fillStyle = c; ctx.font = `${size}px monospace`; ctx.textAlign = 'left'; ctx.fillText(str, Math.floor(x), Math.floor(y)); }
+function pxTextCenter(str, x, y, c, size = 7) { ctx.fillStyle = c; ctx.font = `${size}px monospace`; ctx.textAlign = 'center'; ctx.fillText(str, Math.floor(x), Math.floor(y)); }
+function drawSprite(data, x, y, s = 1) {
+  for (let r = 0; r < data.length; r++) for (let c = 0; c < data[r].length; c++)
+    if (data[r][c]) { ctx.fillStyle = data[r][c]; ctx.fillRect(Math.floor(x + c * s), Math.floor(y + r * s), s, s); }
+}
+const C = { dr:'#8b1a1a', r:'#cc3333', b:'#000', w:'#ffffff', y:'#ffcc00', dg:'#333', g:'#666', lg:'#999', cy:'#00ccff', lc:'#88ffff', bl:'#3344ff' };
+const bossSprite = [
+  [0,0,0,0,C.dg,C.dg,0,0,0,0,0,0,0,0,0,0,0,0,C.dg,C.dg,0,0,0,0],
+  [0,0,0,C.dg,C.g,C.dg,0,0,0,0,0,0,0,0,0,0,0,0,C.dg,C.g,C.dg,0,0,0],
+  [0,0,C.dg,C.g,C.lg,C.dg,0,0,0,0,0,0,0,0,0,0,0,0,C.dg,C.lg,C.g,C.dg,0,0],
+  [0,C.dg,C.g,C.lg,C.dg,0,0,0,0,0,0,0,0,0,0,0,0,0,0,C.dg,C.lg,C.g,C.dg,0],
+  [0,0,0,0,0,0,C.dr,C.dr,C.dr,C.dr,C.dr,C.dr,C.dr,C.dr,C.dr,C.dr,C.dr,C.dr,0,0,0,0,0,0],
+  [0,0,0,0,0,C.dr,C.r,C.r,C.r,C.r,C.r,C.r,C.r,C.r,C.r,C.r,C.r,C.r,C.dr,0,0,0,0,0],
+  [0,0,0,0,C.dr,C.r,C.r,C.r,C.r,C.r,C.r,C.r,C.r,C.r,C.r,C.r,C.r,C.r,C.r,C.dr,0,0,0,0],
+  [0,0,0,0,C.dr,C.r,C.w,C.w,C.w,C.r,C.r,C.r,C.r,C.r,C.w,C.w,C.w,C.r,C.r,C.dr,0,0,0,0],
+  [0,0,0,0,C.dr,C.r,C.w,C.y,C.y,C.r,C.r,C.r,C.r,C.r,C.w,C.y,C.y,C.r,C.r,C.dr,0,0,0,0],
+  [0,0,0,0,C.dr,C.r,C.w,C.y,C.b,C.r,C.r,C.r,C.r,C.r,C.w,C.y,C.b,C.r,C.r,C.dr,0,0,0,0],
+  [0,0,0,0,C.dr,C.r,C.r,C.r,C.r,C.r,C.r,C.r,C.r,C.r,C.r,C.r,C.r,C.r,C.r,C.dr,0,0,0,0],
+  [0,0,0,0,C.dr,C.r,C.r,C.r,C.b,C.b,C.b,C.b,C.b,C.b,C.b,C.b,C.r,C.r,C.r,C.dr,0,0,0,0],
+  [0,0,0,0,C.dr,C.r,C.r,C.r,C.b,C.w,C.b,C.w,C.b,C.w,C.b,C.w,C.r,C.r,C.r,C.dr,0,0,0,0],
+  [0,0,0,0,C.dr,C.r,C.r,C.r,C.r,C.b,C.b,C.b,C.b,C.b,C.b,C.r,C.r,C.r,C.r,C.dr,0,0,0,0],
+  [0,0,0,0,0,C.dr,C.r,C.r,C.r,C.r,C.r,C.r,C.r,C.r,C.r,C.r,C.r,C.r,C.dr,0,0,0,0,0],
+  [0,0,0,0,0,0,C.dr,C.dr,C.r,C.r,C.r,C.r,C.r,C.r,C.r,C.r,C.dr,C.dr,0,0,0,0,0,0],
+  [0,0,0,0,0,0,0,0,C.dr,C.dr,C.r,C.r,C.r,C.r,C.dr,C.dr,0,0,0,0,0,0,0,0],
+  [0,0,0,0,0,0,0,0,0,0,C.dr,C.dr,C.dr,C.dr,0,0,0,0,0,0,0,0,0,0],
+];
+const shipSprite = [
+  [0,0,0,C.cy,C.cy,0,0,0],[0,0,C.cy,C.lc,C.lc,C.cy,0,0],
+  [0,C.cy,C.lc,C.w,C.w,C.lc,C.cy,0],[0,C.cy,C.lc,C.bl,C.bl,C.lc,C.cy,0],
+  [C.cy,C.lc,C.lc,C.lc,C.lc,C.lc,C.lc,C.cy],[C.cy,C.cy,0,C.cy,C.cy,0,C.cy,C.cy],
+  [C.cy,0,0,0,0,0,0,C.cy],
+];
+
+// ============ GAME STATE ============
+const BOSS_MAX_HP = 1200;
+const PLAYER_LIVES = 4;
+let state = 'title', frame = 0, shake = 0;
+let bossHP, bossX, bossY = 34;
+let player, pShots, bullets, particles;
+let current = null;        // running pattern { spec, emitters:[{spec, timer, angle, sweep}], t, dur, invented }
+let gapTimer = 0;          // pause + banner between patterns
+let banner = null;         // { text, sub, timer, invented }
+let patternsRun = 0;
+
+function phase() { const f = bossHP / BOSS_MAX_HP; return f > 0.66 ? 1 : f > 0.33 ? 2 : 3; }
+
+// ============ FAIRNESS VALIDATOR ============
+// Everything Gemini sends goes through here. Unknown values fall back to
+// safe defaults; numbers are clamped; total bullet rate is capped per phase.
+const ORIGINS = ['boss', 'center', 'top_edge', 'left_edge', 'right_edge', 'corners', 'around_player'];
+const SHAPES = ['ring', 'spiral', 'aimed', 'fan', 'wall', 'rain'];
+const PALETTE = ['#f44', '#f80', '#ff0', '#f0f', '#4ff', '#f4f', '#fa4'];
+const clamp = (v, lo, hi, def) => { v = Number(v); return Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : def; };
+
+function emitterRate(e) { // bullets per second
+  const perFire = e.shape === 'wall' ? Math.max(0, e.count - e.gap_size) : e.shape === 'spiral' ? e.count : e.count;
+  const mult = e.origin === 'corners' ? 4 : 1;
+  return perFire * mult * (1000 / e.interval_ms);
+}
+
+function validatePattern(raw, ph) {
+  const p = raw && typeof raw === 'object' ? raw : {};
+  const maxEmitters = ph === 1 ? 2 : 3;
+  const maxSpeed = [0, 1.8, 2.2, 2.6][ph];
+  const rateCap = [0, 16, 22, 28][ph];
+  const list = Array.isArray(p.emitters) ? p.emitters.slice(0, maxEmitters) : [];
+  const emitters = list.map((r, i) => {
+    r = r && typeof r === 'object' ? r : {};
+    const shape = SHAPES.includes(r.shape) ? r.shape : 'ring';
+    let origin = ORIGINS.includes(r.origin) ? r.origin : 'boss';
+    if (shape === 'wall' && !['top_edge', 'left_edge', 'right_edge'].includes(origin)) origin = 'top_edge';
+    if (shape === 'rain') origin = 'top_edge';
+    const maxCount = shape === 'wall' ? 16 : shape === 'rain' ? 6 : shape === 'spiral' ? 5 : 20;
+    const count = Math.round(clamp(r.count, 1, maxCount, Math.min(8, maxCount)));
+    const e = {
+      shape, origin, count,
+      speed: clamp(r.speed, 0.6, maxSpeed, 1.3),
+      interval_ms: clamp(r.interval_ms, shape === 'spiral' ? 90 : 200, 2500, 600),
+      rotation_speed: clamp(r.rotation_speed, -0.35, 0.35, 0.12),
+      // walls always leave at least 3 open slots (~player width x4); rain leaves a 40px safe lane
+      gap_size: Math.round(clamp(r.gap_size, shape === 'wall' ? 3 : 0, Math.max(3, count - 1), 3)),
+      spread_deg: clamp(r.spread_deg, 10, 160, 60),
+      bullet_size: clamp(r.bullet_size, 2, 5, 3),
+      color: /^#[0-9a-f]{3}([0-9a-f]{3})?$/i.test(r.color || '') ? r.color : PALETTE[i % PALETTE.length],
+    };
+    return e;
+  });
+  // two walls from the same edge could line up with no common hole: keep only the first
+  const wallEdges = new Set();
+  const deduped = emitters.filter(e => { if (e.shape !== 'wall') return true; if (wallEdges.has(e.origin)) return false; wallEdges.add(e.origin); return true; });
+  emitters.length = 0; emitters.push(...deduped);
+  if (!emitters.length) emitters.push(validatePattern({ emitters: [{ shape: 'ring', origin: 'boss', count: 10 }] }, ph).emitters[0]);
+  // global bullet budget: stretch intervals until under the cap
+  const total = emitters.reduce((s, e) => s + emitterRate(e), 0);
+  if (total > rateCap) { const k = total / rateCap; for (const e of emitters) e.interval_ms = Math.min(4000, e.interval_ms * k); }
+  return {
+    name: String(p.name || 'Untitled').slice(0, 28),
+    taunt: String(p.taunt || '').slice(0, 90),
+    reasoning: String(p.reasoning || '').slice(0, 300),
+    duration_s: clamp(p.duration_s, 6, 14, 9),
+    emitters,
+  };
+}
+
+// ============ BUILT-IN LIBRARY (same DSL) ============
+const LIBRARY = [
+  { name: 'Opening Ring', taunt: 'Let\'s start simple.', emitters: [{ origin: 'boss', shape: 'ring', count: 12, speed: 1.2, interval_ms: 900, rotation_speed: 0.13 }] },
+  { name: 'Spiral Staircase', taunt: 'Round and round.', emitters: [{ origin: 'boss', shape: 'spiral', count: 3, speed: 1.3, interval_ms: 120, rotation_speed: 0.22 }] },
+  { name: 'Curtain Call', taunt: 'Find the gap.', emitters: [{ origin: 'top_edge', shape: 'wall', count: 14, speed: 1.1, interval_ms: 1300, gap_size: 4 }] },
+  { name: 'Sniper Fan', taunt: 'I see you.', emitters: [{ origin: 'boss', shape: 'aimed', count: 5, speed: 1.8, interval_ms: 700, spread_deg: 50 }] },
+  { name: 'Monsoon', taunt: 'Bring an umbrella.', emitters: [{ origin: 'top_edge', shape: 'rain', count: 4, speed: 1.4, interval_ms: 260, gap_size: 1 }] },
+  { name: 'Crossfire', taunt: 'Left AND right.', emitters: [{ origin: 'left_edge', shape: 'wall', count: 12, speed: 1.0, interval_ms: 1800, gap_size: 4 }, { origin: 'right_edge', shape: 'wall', count: 12, speed: 1.0, interval_ms: 1800, gap_size: 4 }] },
+  { name: 'Corner Pocket', taunt: 'No hiding spots.', emitters: [{ origin: 'corners', shape: 'aimed', count: 1, speed: 1.3, interval_ms: 900, spread_deg: 10 }, { origin: 'boss', shape: 'fan', count: 7, speed: 1.2, interval_ms: 1000, spread_deg: 90, rotation_speed: 0.2 }] },
+  { name: 'Closing Net', taunt: 'Nowhere to stand.', emitters: [{ origin: 'around_player', shape: 'ring', count: 10, speed: 0.9, interval_ms: 1600 }, { origin: 'boss', shape: 'aimed', count: 3, speed: 1.6, interval_ms: 900, spread_deg: 30 }] },
+];
+
+// ============ PATTERN ENGINE ============
+function startPattern(raw, invented) {
+  const spec = validatePattern(raw, phase());
+  current = {
+    spec, invented, t: 0, dur: Math.round(spec.duration_s * 60),
+    emitters: spec.emitters.map(e => ({ spec: e, timer: 20, angle: Math.random() * Math.PI * 2, sweep: Math.random() * 10 })),
+  };
+  patternsRun++;
+  tele.patternName = spec.name;
+  banner = { text: `INCOMING: ${spec.name}`, timer: 110, invented };
+  if (spec.taunt) showTaunt(spec.taunt);
+  $('now').innerHTML = `${esc(spec.name)}<span class="tag ${invented ? 'gem' : 'built'}">${invented ? 'GEMINI-INVENTED' : 'BUILT-IN'}</span>`;
+  if (invented && spec.reasoning) addThought(`<b>${esc(spec.name)}</b> — ${esc(spec.reasoning)}`);
+  // latency hiding: design the NEXT attack while this one plays
+  geminiDesignNext();
+}
+
+function originPoints(o) {
+  const cx = IW / 2;
+  switch (o) {
+    case 'boss': return [[bossX, bossY + 10]];
+    case 'center': return [[cx, IH * 0.4]];
+    case 'top_edge': return [[cx, 0]];
+    case 'left_edge': return [[0, IH * 0.45]];
+    case 'right_edge': return [[IW, IH * 0.45]];
+    case 'corners': return [[4, 60], [IW - 4, 60], [4, IH - 4], [IW - 4, IH - 4]];
+    case 'around_player': { // always at least 70px from the player
+      const a = Math.random() * Math.PI * 2, d = 70 + Math.random() * 20;
+      return [[Math.max(8, Math.min(IW - 8, player.x + Math.cos(a) * d)), Math.max(60, Math.min(IH - 8, player.y + Math.sin(a) * d))]];
+    }
+  }
+  return [[bossX, bossY + 10]];
+}
+
+function spawn(x, y, ang, spd, e) { bullets.push({ x, y, vx: Math.cos(ang) * spd, vy: Math.sin(ang) * spd, r: e.bullet_size, c: e.color }); }
+
+function fireEmitter(em) {
+  const e = em.spec;
+  const toPlayer = (x, y) => Math.atan2(player.y - y, player.x - x);
+  for (const [ox, oy] of originPoints(e.origin)) {
+    if (e.shape === 'ring') {
+      for (let i = 0; i < e.count; i++) spawn(ox, oy, em.angle + i / e.count * Math.PI * 2, e.speed, e);
+      em.angle += e.rotation_speed * 4;
+    } else if (e.shape === 'spiral') {
+      for (let i = 0; i < e.count; i++) spawn(ox, oy, em.angle + i / e.count * Math.PI * 2, e.speed, e);
+      em.angle += e.rotation_speed;
+    } else if (e.shape === 'aimed' || e.shape === 'fan') {
+      const base = e.shape === 'aimed' ? toPlayer(ox, oy) : (oy > IH / 2 ? -Math.PI / 2 : Math.PI / 2) + Math.sin(em.angle) * 0.6;
+      const spread = e.spread_deg * Math.PI / 180;
+      for (let i = 0; i < e.count; i++) spawn(ox, oy, base + (e.count === 1 ? 0 : (i / (e.count - 1) - 0.5) * spread), e.speed, e);
+      em.angle += e.rotation_speed * 3;
+    } else if (e.shape === 'wall') {
+      // a full line with a guaranteed hole that sweeps between fires
+      const horizontal = e.origin === 'top_edge';
+      const len = horizontal ? IW : IH - 60;
+      em.sweep += 1.7;
+      const holeStart = Math.floor((Math.sin(em.sweep) * 0.5 + 0.5) * (e.count - e.gap_size));
+      for (let i = 0; i < e.count; i++) {
+        if (i >= holeStart && i < holeStart + e.gap_size) continue;
+        const pos = (i + 0.5) / e.count * len;
+        if (horizontal) spawn(pos, 0, Math.PI / 2, e.speed, e);
+        else spawn(e.origin === 'left_edge' ? 0 : IW, 60 + pos, e.origin === 'left_edge' ? 0 : Math.PI, e.speed, e);
+      }
+    } else if (e.shape === 'rain') {
+      // random drops, but never inside a 40px safe lane that drifts slowly
+      const lane = (Math.sin(frame * 0.01 + em.sweep) * 0.5 + 0.5) * (IW - 40);
+      for (let i = 0; i < e.count; i++) {
+        let x = Math.random() * (IW - 40); if (x > lane) x += 40;
+        spawn(x, 0, Math.PI / 2 + (Math.random() - 0.5) * 0.15, e.speed * (0.8 + Math.random() * 0.4), e);
+      }
+    }
+  }
+}
+
+function updatePattern() {
+  if (!current) return;
+  current.t++;
+  for (const em of current.emitters) {
+    if (--em.timer <= 0) { fireEmitter(em); em.timer = Math.max(4, Math.round(em.spec.interval_ms / 1000 * 60)); }
+  }
+  if (current.t >= current.dur) { endPattern(); }
+}
+
+function endPattern() {
+  current = null; gapTimer = 70;
+}
+
+function pickNext() {
+  // Gemini's design if ready, else built-in library (prefer ones that hurt the player)
+  if (gemini.next) { const n = gemini.next; gemini.next = null; startPattern(n, true); return; }
+  const w = LIBRARY.map(p => 1 + (tele.hitsBy[p.name] || 0) * 2 - (p.name === tele.patternName ? 1 : 0));
+  let r = Math.random() * w.reduce((a, b) => a + b, 0), i = 0;
+  while ((r -= w[i]) > 0 && i < LIBRARY.length - 1) i++;
+  startPattern(LIBRARY[i], false);
+}
+
+// ============ TELEMETRY ============
+let tele;
+function resetTele() {
+  tele = { heat: new Array(9).fill(0), frames: 0, moves: { left: 0, right: 0, up: 0, down: 0, still: 0 },
+    dodges: { left: 0, right: 0, up: 0, down: 0, none: 0 }, shooting: 0, hitsBy: {}, patternName: '', history: [] };
+}
+function region(x, y) { return Math.min(2, Math.floor(y / (IH / 3))) * 3 + Math.min(2, Math.floor(x / (IW / 3))); }
+const REGION_NAMES = ['top-left', 'top-center', 'top-right', 'mid-left', 'center', 'mid-right', 'bottom-left', 'bottom-center', 'bottom-right'];
+function telemetrySummary() {
+  const pct = n => `${Math.round(n / Math.max(1, tele.frames) * 100)}%`;
+  const heat = tele.heat.map((v, i) => [REGION_NAMES[i], v]).sort((a, b) => b[1] - a[1]).filter(r => r[1] > 0).map(([n, v]) => `${n} ${pct(v)}`).join(', ');
+  const mv = Object.entries(tele.moves).map(([k, v]) => `${k} ${pct(v)}`).join(', ');
+  const dTotal = Object.values(tele.dodges).reduce((a, b) => a + b, 0) || 1;
+  const dg = Object.entries(tele.dodges).map(([k, v]) => `${k} ${Math.round(v / dTotal * 100)}%`).join(', ');
+  const hits = Object.entries(tele.hitsBy).map(([k, v]) => `${k}: ${v}`).join(', ') || 'none yet';
+  const hist = tele.history.slice(-6).map(h => `${h.name} (${h.invented ? 'yours' : 'built-in'}, hit player ${h.hits}x)`).join('; ') || 'none';
+  return [
+    `Boss HP ${Math.round(bossHP / BOSS_MAX_HP * 100)}% (phase ${phase()} of 3). Player lives left: ${player.lives}/${PLAYER_LIVES}.`,
+    `Player is currently in the ${REGION_NAMES[region(player.x, player.y)]} region.`,
+    `Time spent per region: ${heat}.`,
+    `Movement: ${mv}. Shooting ${pct(tele.shooting)} of the time.`,
+    `When a bullet gets close, the player dodges: ${dg}.`,
+    `Hits on the player by pattern: ${hits}.`,
+    `Recent attacks: ${hist}.`,
+  ].join('\n');
+}
+
+// ============ GEMINI ============
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const gemini = { key: '', model: 'gemini-2.5-flash', busy: false, backoffUntil: 0, next: null, invented: 0, reportDone: false };
+
+const SYSTEM_PROMPT = `You are THE ARCHITECT, the boss of a vertical bullet-hell game. A human pilots a tiny ship at the bottom and shoots at you. You fight by DESIGNING bullet patterns in a small JSON language, aimed at the human's observed weaknesses.
+Arena: 300 wide x 400 tall pixels, y grows downward, you sit at the top center. Player ship hitbox is ~4px and moves ~2px/frame (60fps).
+Pattern language: an attack has 1-3 emitters that fire repeatedly for duration_s seconds.
+- origin: boss | center | top_edge | left_edge | right_edge | corners (fires from all 4 corners) | around_player (a point ~70px from the player)
+- shape: ring (count bullets in a circle, rotating by rotation_speed), spiral (count arms, one bullet each per fire; use short interval_ms like 100-150), aimed (count bullets in a spread_deg fan at the player), fan (fan pointing down/up that sways), wall (a line of count bullets with a gap of gap_size slots; top_edge wall falls down, left/right walls cross the arena), rain (count random drops per fire, always leaves a safe lane)
+- speed 0.6-2.6 px/frame, interval_ms 90-2500, rotation_speed -0.35..0.35 rad, bullet_size 2-5, color as #hex.
+A fairness engine will clamp values and cap total bullet density, so focus on CLEVER combinations rather than raw density: e.g. aimed shots that punish the player's favourite dodge direction, walls that push them out of their favourite region into a spiral, corner shots if they camp corners.
+Respond only with JSON. name: a short punchy original attack name. taunt: under 12 words, cocky, referencing the player's actual habits. reasoning: 1-2 sentences explaining which weakness this attack exploits and how. Never repeat a previous name.`;
+
+const EMITTER_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    origin: { type: 'STRING', enum: ORIGINS }, shape: { type: 'STRING', enum: SHAPES },
+    count: { type: 'INTEGER' }, speed: { type: 'NUMBER' }, interval_ms: { type: 'INTEGER' },
+    rotation_speed: { type: 'NUMBER' }, gap_size: { type: 'INTEGER' }, spread_deg: { type: 'NUMBER' },
+    bullet_size: { type: 'NUMBER' }, color: { type: 'STRING' },
+  },
+  required: ['origin', 'shape', 'count', 'speed', 'interval_ms'],
+};
+const PATTERN_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    name: { type: 'STRING' }, taunt: { type: 'STRING' }, reasoning: { type: 'STRING' },
+    duration_s: { type: 'NUMBER' }, emitters: { type: 'ARRAY', items: EMITTER_SCHEMA },
+  },
+  required: ['name', 'taunt', 'reasoning', 'duration_s', 'emitters'],
+};
+
+function geminiLoad() {
+  try { gemini.key = localStorage.getItem('gemini_key') || ''; gemini.model = localStorage.getItem('gemini_model') || gemini.model; } catch (e) {}
+  $('gkey').value = gemini.key; $('gmodel').value = gemini.model;
+  geminiStatus();
+}
+function geminiStatus(kind, text) {
+  const el = $('gstatus');
+  el.className = kind || (gemini.key ? 'on' : '');
+  el.textContent = text || (gemini.key ? 'online' : 'offline');
+  $('keyrow').classList.toggle('hidden', !!gemini.key);
+}
+$('gsave').onclick = () => {
+  gemini.key = $('gkey').value.trim(); gemini.model = $('gmodel').value.trim() || 'gemini-2.5-flash';
+  try { localStorage.setItem('gemini_key', gemini.key); localStorage.setItem('gemini_model', gemini.model); } catch (e) {}
+  gemini.backoffUntil = 0; geminiStatus(); $('gkey').blur(); $('gmodel').blur();
+};
+$('changekey').onclick = () => $('keyrow').classList.remove('hidden');
+
+async function geminiRequest(prompt, schema) {
+  const body = {
+    systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    generationConfig: { temperature: 1.0, ...(schema ? { responseMimeType: 'application/json', responseSchema: schema } : {}) },
+  };
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(gemini.model)}:generateContent`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': gemini.key }, body: JSON.stringify(body),
+  });
+  if (!res.ok) { const err = new Error(`HTTP ${res.status}`); err.status = res.status; err.detail = await res.text(); throw err; }
+  const data = await res.json();
+  return (data.candidates?.[0]?.content?.parts || []).filter(p => !p.thought).map(p => p.text || '').join('');
+}
+
+function geminiHandleError(e) {
+  console.warn('Gemini error', e, e.detail);
+  const s = e.status;
+  if (s === 429) { gemini.backoffUntil = performance.now() + 20000; geminiStatus('err', 'rate limited'); }
+  else if (s === 400 || s === 403) { gemini.backoffUntil = performance.now() + 30000; geminiStatus('err', s === 403 ? 'bad key' : 'bad request'); }
+  else if (s === 404) { gemini.backoffUntil = performance.now() + 30000; geminiStatus('err', 'unknown model'); }
+  else { gemini.backoffUntil = performance.now() + 8000; geminiStatus('err', 'error'); }
+}
+
+async function geminiDesignNext() {
+  if (!gemini.key || gemini.busy || gemini.next || state !== 'play' || performance.now() < gemini.backoffUntil) {
+    if (!gemini.key) $('next').innerHTML = 'built-in library <span class="tag built">OFFLINE</span>';
+    return;
+  }
+  gemini.busy = true;
+  geminiStatus('busy', 'designing…');
+  $('next').textContent = 'Gemini is designing a counter-attack…';
+  const prompt = `Design your next attack (phase ${phase()}: ${['', 'warm-up, keep it readable', 'getting serious', 'desperate, go all out'][phase()]}).\n\nPlayer telemetry:\n${telemetrySummary()}\n\nNames you already used: ${tele.history.map(h => h.name).join(', ') || 'none'}.`;
+  try {
+    const raw = JSON.parse(await geminiRequest(prompt, PATTERN_SCHEMA));
+    if (state === 'play') {
+      gemini.next = raw; gemini.invented++;
+      $('next').innerHTML = `${esc(String(raw.name || 'Untitled').slice(0, 28))}<span class="tag gem">READY</span>`;
+    }
+    geminiStatus();
+  } catch (e) {
+    geminiHandleError(e);
+    $('next').innerHTML = 'built-in library <span class="tag built">FALLBACK</span>';
+  }
+  gemini.busy = false;
+}
+
+async function geminiReport(won) {
+  if (gemini.reportDone || !gemini.key) return;
+  gemini.reportDone = true;
+  $('thoughts').innerHTML = '<div id="report">Writing post-match report…</div>';
+  const prompt = `The match is over: the human ${won ? 'DEFEATED you' : 'ran out of lives'} after ${patternsRun} attacks (${gemini.invented} of them designed by you).\n${telemetrySummary()}\nWrite a short post-match report (max 90 words, plain text, no markdown) addressed to the human: their most exploitable habit, which of your attacks worked best, and one concrete tip. Stay in character as THE ARCHITECT.`;
+  try { $('report').textContent = await geminiRequest(prompt); }
+  catch (e) { $('report').textContent = 'Report unavailable (' + e.message + ').'; }
+}
+
+function addThought(html) {
+  const d = document.createElement('div'); d.className = 'thought';
+  d.innerHTML = `<div class="t">phase ${phase()} · ${(frame / 60).toFixed(0)}s</div>${html}`;
+  $('thoughts').prepend(d);
+  while ($('thoughts').children.length > 20) $('thoughts').lastChild.remove();
+}
+let taunt = '', tauntTimer = 0;
+function showTaunt(t) { taunt = t; tauntTimer = 220; $('taunt').textContent = t; }
+
+// ============ GAME FLOW ============
+function startGame() {
+  bossHP = BOSS_MAX_HP; bossX = IW / 2;
+  player = { x: IW / 2, y: IH - 40, lives: PLAYER_LIVES, iframes: 60, shotCd: 0, lastX: IW / 2, lastY: IH - 40 };
+  pShots = []; bullets = []; particles = []; current = null; gapTimer = 60; banner = null; patternsRun = 0;
+  gemini.next = null; gemini.invented = 0; gemini.reportDone = false;
+  resetTele();
+  $('thoughts').innerHTML = ''; $('now').textContent = '—'; $('next').textContent = '—';
+  showTaunt(gemini.key ? 'I\'ve been studying you already.' : 'Show me what you\'ve got.');
+  state = 'play';
+}
+
+function burst(x, y, c, n) {
+  for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2, s = 0.5 + Math.random() * 2; particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 20 + Math.random() * 15, c }); }
+}
+
+function update() {
+  frame++;
+  if (tauntTimer > 0) tauntTimer--;
+  if (state !== 'play') {
+    if (keys['Enter']) { keys['Enter'] = false; startGame(); }
+    return;
+  }
+  shake *= 0.88;
+
+  // --- player ---
+  const slow = keys['Shift'] ? 0.45 : 1;
+  let dx = 0, dy = 0;
+  if (keys['ArrowLeft'] || keys['a']) dx -= 1;
+  if (keys['ArrowRight'] || keys['d']) dx += 1;
+  if (keys['ArrowUp'] || keys['w']) dy -= 1;
+  if (keys['ArrowDown'] || keys['s']) dy += 1;
+  if (dx && dy) { dx *= 0.707; dy *= 0.707; }
+  player.x = Math.max(5, Math.min(IW - 5, player.x + dx * 2.2 * slow));
+  player.y = Math.max(70, Math.min(IH - 6, player.y + dy * 2.2 * slow));
+  if (player.iframes > 0) player.iframes--;
+  const shooting = keys[' '] || keys['z'];
+  if (player.shotCd > 0) player.shotCd--;
+  if (shooting && player.shotCd <= 0) { pShots.push({ x: player.x - 2, y: player.y - 6 }, { x: player.x + 2, y: player.y - 6 }); player.shotCd = 6; }
+
+  // --- telemetry ---
+  tele.frames++; tele.heat[region(player.x, player.y)]++;
+  if (shooting) tele.shooting++;
+  if (dx < 0) tele.moves.left++; else if (dx > 0) tele.moves.right++;
+  if (dy < 0) tele.moves.up++; else if (dy > 0) tele.moves.down++;
+  if (!dx && !dy) tele.moves.still++;
+  if (frame % 6 === 0 && bullets.some(b => Math.abs(b.x - player.x) < 28 && Math.abs(b.y - player.y) < 28)) {
+    if (dx < 0) tele.dodges.left++; else if (dx > 0) tele.dodges.right++;
+    else if (dy < 0) tele.dodges.up++; else if (dy > 0) tele.dodges.down++; else tele.dodges.none++;
+  }
+
+  // --- boss ---
+  bossX = IW / 2 + Math.sin(frame * 0.012) * (60 + phase() * 15);
+  for (let i = pShots.length - 1; i >= 0; i--) {
+    const s = pShots[i]; s.y -= 6;
+    if (s.y < -5) { pShots.splice(i, 1); continue; }
+    if (Math.abs(s.x - bossX) < 22 && Math.abs(s.y - bossY) < 18) {
+      const before = phase();
+      bossHP -= 1; pShots.splice(i, 1);
+      if (Math.random() < 0.3) burst(s.x, s.y, '#ff0', 1);
+      if (phase() !== before && bossHP > 0) { shake = 10; burst(bossX, bossY, '#f44', 30); showTaunt(['', '', 'Fine. No more warm-up.', 'NOW you\'ve made me angry.'][phase()]); bullets = []; }
+      if (bossHP <= 0) { state = 'win'; burst(bossX, bossY, '#ff0', 60); shake = 15; bullets = []; geminiReport(true); return; }
+    }
+  }
+
+  // --- patterns ---
+  if (current) updatePattern();
+  else if (--gapTimer <= 0) pickNext();
+  if (banner && --banner.timer <= 0) banner = null;
+
+  // --- bullets ---
+  for (let i = bullets.length - 1; i >= 0; i--) {
+    const b = bullets[i]; b.x += b.vx; b.y += b.vy;
+    if (b.x < -20 || b.x > IW + 20 || b.y < -20 || b.y > IH + 20) { bullets.splice(i, 1); continue; }
+    if (player.iframes > 0) continue;
+    const ddx = b.x - player.x, ddy = b.y - player.y;
+    if (ddx * ddx + ddy * ddy < (b.r + 1.5) * (b.r + 1.5)) {
+      player.lives--; player.iframes = 120; shake = 8; burst(player.x, player.y, '#0ff', 25);
+      const name = current ? current.spec.name : tele.patternName;
+      tele.hitsBy[name] = (tele.hitsBy[name] || 0) + 1;
+      const h = tele.history[tele.history.length - 1]; if (h) h.hits++;
+      bullets = bullets.filter(bb => Math.hypot(bb.x - player.x, bb.y - player.y) > 50);
+      if (player.lives <= 0) { state = 'lose'; showTaunt('As designed.'); geminiReport(false); return; }
+      break;
+    }
+  }
+  for (let i = particles.length - 1; i >= 0; i--) { const p = particles[i]; p.x += p.vx; p.y += p.vy; p.vx *= 0.94; p.vy *= 0.94; if (--p.life <= 0) particles.splice(i, 1); }
+}
+
+// keep a history entry per pattern for telemetry
+const _startPattern = startPattern;
+startPattern = function (raw, invented) { _startPattern(raw, invented); tele.history.push({ name: current.spec.name, invented, hits: 0 }); };
+
+// ============ RENDER ============
+function drawBg() {
+  pxRect(0, 0, IW, IH, '#0a0010');
+  for (let i = 0; i < 50; i++) { const sx = (i * 73) % IW, sy = (i * 97 + frame * (0.3 + (i % 3) * 0.3)) % IH; pxRect(sx, sy, 1, 1, i % 3 === 0 ? '#448' : '#224'); }
+}
+
+function render() {
+  drawBg();
+  if (state === 'title') return renderTitle();
+  ctx.save();
+  if (shake > 0.5) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
+
+  // boss
+  const ph = phase();
+  if (ph > 1) { ctx.globalAlpha = 0.12 + ph * 0.05 + Math.sin(frame * 0.1) * 0.05; pxRect(bossX - 26, bossY - 22, 52, 44, ph === 3 ? '#f00' : '#f80'); ctx.globalAlpha = 1; }
+  if (state !== 'win') drawSprite(bossSprite, bossX - 24, bossY - 19, 2);
+
+  // bullets
+  for (const b of bullets) { pxRect(b.x - b.r, b.y - b.r, b.r * 2, b.r * 2, b.c); pxRect(b.x - b.r / 2, b.y - b.r / 2, Math.max(1, b.r), Math.max(1, b.r), '#fff'); }
+  // player shots
+  for (const s of pShots) pxRect(s.x, s.y, 1, 4, '#8ff');
+  // player
+  if (state === 'play' && (player.iframes <= 0 || Math.floor(frame / 4) % 2 === 0)) {
+    drawSprite(shipSprite, player.x - 4, player.y - 4, 1);
+    pxRect(player.x - 1, player.y - 1, 2, 2, keys['Shift'] ? '#fff' : '#f44');
+  }
+  for (const p of particles) { ctx.globalAlpha = Math.min(1, p.life / 20); pxRect(p.x, p.y, 1, 1, p.c); }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+
+  // HUD
+  const hpW = 180, hpX = IW / 2 - hpW / 2;
+  pxRect(hpX, 4, hpW, 5, '#222');
+  const f = Math.max(0, bossHP / BOSS_MAX_HP);
+  pxRect(hpX, 4, Math.ceil(hpW * f), 5, f > 0.66 ? '#f44' : f > 0.33 ? '#f80' : '#ff0');
+  pxBorder(hpX, 4, hpW, 5, '#fff');
+  for (const m of [0.33, 0.66]) pxRect(hpX + hpW * m, 4, 1, 5, '#fff');
+  pxText(`PHASE ${ph}`, 4, 9, '#f44', 6);
+  for (let i = 0; i < PLAYER_LIVES; i++) pxRect(IW - 8 - i * 7, 4, 5, 5, i < player.lives ? '#0ff' : '#333');
+
+  if (current) {
+    pxRect(0, IH - 2, IW * (1 - current.t / current.dur), 2, current.invented ? '#f44' : '#666');
+    pxText(current.spec.name, 4, IH - 6, current.invented ? '#f88' : '#666', 6);
+    if (current.invented) pxText('GEMINI', IW - 34, IH - 6, '#f44', 6);
+  }
+  if (banner && state === 'play') {
+    ctx.globalAlpha = Math.min(1, banner.timer / 20);
+    pxRect(0, IH / 2 - 16, IW, 26, banner.invented ? '#300' : '#111');
+    pxTextCenter(banner.text, IW / 2, IH / 2 - 2, banner.invented ? '#f66' : '#ccc', 9);
+    pxTextCenter(banner.invented ? 'freshly designed by Gemini' : 'from the built-in library', IW / 2, IH / 2 + 7, '#888', 6);
+    ctx.globalAlpha = 1;
+  }
+  drawBubble();
+
+  if (state === 'win' || state === 'lose') {
+    ctx.globalAlpha = 0.75; pxRect(0, 0, IW, IH, '#000'); ctx.globalAlpha = 1;
+    pxTextCenter(state === 'win' ? 'ARCHITECT DEFEATED' : 'DESTROYED', IW / 2, IH / 2 - 30, state === 'win' ? '#ff0' : '#f44', 14);
+    pxTextCenter(`${patternsRun} attacks · ${gemini.invented} invented by Gemini`, IW / 2, IH / 2 - 8, '#888', 6);
+    pxTextCenter(`Boss HP left: ${Math.max(0, Math.round(bossHP / BOSS_MAX_HP * 100))}%`, IW / 2, IH / 2 + 4, '#888', 6);
+    if (Math.floor(frame / 30) % 2 === 0) pxTextCenter('PRESS ENTER', IW / 2, IH / 2 + 30, '#fff', 8);
+  }
+}
+
+function drawBubble() {
+  if (tauntTimer <= 0 || !taunt || state === 'title') return;
+  ctx.font = '6px monospace';
+  const lines = []; let line = '';
+  for (const w of taunt.split(' ')) { const t = line ? line + ' ' + w : w; if (ctx.measureText(t).width > 120) { lines.push(line); line = w; } else line = t; }
+  if (line) lines.push(line);
+  const bw = 128, bh = lines.length * 8 + 6;
+  const bx = Math.max(2, Math.min(IW - bw - 2, bossX + 28)), by = bossY + 18;
+  ctx.globalAlpha = Math.min(1, tauntTimer / 30);
+  pxRect(bx, by, bw, bh, '#280808'); pxBorder(bx, by, bw, bh, '#f44');
+  lines.forEach((l, i) => pxText(l, bx + 4, by + 9 + i * 8, '#fdd', 6));
+  ctx.globalAlpha = 1;
+}
+
+function renderTitle() {
+  pxTextCenter('THE ARCHITECT', IW / 2, 90, '#f44', 16);
+  drawSprite(bossSprite, IW / 2 - 24, 110, 2);
+  pxTextCenter('A boss that designs its own attacks', IW / 2, 172, '#aaa', 7);
+  pxTextCenter('by studying how YOU play.', IW / 2, 182, '#aaa', 7);
+  pxTextCenter(gemini.key ? 'Gemini is connected. It is watching.' : 'No Gemini key: built-in attacks only', IW / 2, 202, gemini.key ? '#0ff' : '#666', 6);
+  pxTextCenter('WASD / Arrows   move', IW / 2, 232, '#888', 7);
+  pxTextCenter('Space / Z       shoot', IW / 2, 244, '#888', 7);
+  pxTextCenter('Shift           focus (slow)', IW / 2, 256, '#888', 7);
+  if (Math.floor(frame / 30) % 2 === 0) pxTextCenter('PRESS ENTER', IW / 2, 300, '#fff', 10);
+}
+
+function blit() { dctx.clearRect(0, 0, display.width, display.height); dctx.drawImage(buffer, 0, 0, IW, IH, 0, 0, IW * scale, IH * scale); }
+function loop() { update(); render(); blit(); requestAnimationFrame(loop); }
+geminiLoad();
+loop();
+</script>
+</body>
+</html>

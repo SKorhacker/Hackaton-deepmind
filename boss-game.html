@@ -7,10 +7,46 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { background: #0a0010; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; }
 canvas { image-rendering: pixelated; image-rendering: crisp-edges; cursor: crosshair; }
+body { gap: 16px; font-family: ui-monospace, Menlo, monospace; color: #ccc; }
+#brain { width: 320px; height: min(92vh, 640px); display: flex; flex-direction: column; gap: 10px; background: #120a1e; border: 1px solid #2a1f3d; border-radius: 8px; padding: 12px; font-size: 12px; }
+#brain h2 { font-size: 13px; color: #0ff; letter-spacing: 1px; display: flex; justify-content: space-between; align-items: center; }
+#gstatus { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: #222; color: #888; }
+#gstatus.on { background: #033; color: #0ff; }
+#gstatus.busy { background: #330; color: #ff0; }
+#gstatus.err { background: #300; color: #f66; }
+#keyrow { display: flex; flex-direction: column; gap: 6px; }
+#keyrow input { background: #0a0612; border: 1px solid #333; color: #ddd; padding: 5px 6px; border-radius: 4px; font: inherit; }
+#keyrow button { background: #0ff; color: #000; border: 0; padding: 5px; border-radius: 4px; font: inherit; font-weight: bold; cursor: pointer; }
+#keyrow.hidden { display: none; }
+.label { color: #666; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 3px; }
+#taunt { color: #fff; font-size: 13px; background: #0a2a2a; border-left: 3px solid #0ff; padding: 8px; border-radius: 4px; min-height: 36px; }
+#plan { color: #ff0; }
+#predict { color: #f80; }
+#thoughts { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.thought { color: #9ab; line-height: 1.4; border-left: 2px solid #334; padding-left: 8px; }
+.thought:first-child { color: #cde; border-color: #0ff; }
+.thought .t { color: #555; font-size: 10px; }
+#report { color: #ddd; line-height: 1.5; white-space: pre-wrap; }
+#changekey { color: #555; font-size: 10px; cursor: pointer; text-decoration: underline; background: none; border: 0; text-align: left; }
 </style>
 </head>
 <body>
 <canvas id="display"></canvas>
+<div id="brain">
+  <h2>GEMINI BRAIN <span id="gstatus">offline</span></h2>
+  <div id="keyrow">
+    <input id="gkey" type="password" placeholder="Gemini API key" autocomplete="off">
+    <input id="gmodel" type="text" placeholder="model" value="gemini-2.5-flash">
+    <button id="gsave">Connect</button>
+    <div style="color:#555;font-size:10px">Key is stored only in this browser (localStorage). Without a key the AI plays on reflexes only.</div>
+  </div>
+  <div><div class="label">Says</div><div id="taunt">…</div></div>
+  <div><div class="label">Plan</div><div id="plan">—</div></div>
+  <div><div class="label">Predicts your next attack</div><div id="predict">—</div></div>
+  <div class="label">Thinking</div>
+  <div id="thoughts"></div>
+  <button id="changekey">change API key</button>
+</div>
 <canvas id="buffer" style="display:none"></canvas>
 <script>
 // ============ PIXEL ART SETUP ============
@@ -25,7 +61,7 @@ dctx.imageSmoothingEnabled = false;
 
 let scale = 1;
 function resize() {
-  scale = Math.min(Math.floor(window.innerWidth / IW), Math.floor(window.innerHeight / IH));
+  scale = Math.min(Math.floor((window.innerWidth - 360) / IW), Math.floor(window.innerHeight / IH));
   scale = Math.max(1, scale);
   display.width = IW * scale;
   display.height = IH * scale;
@@ -37,7 +73,7 @@ window.addEventListener('resize', resize);
 // ============ INPUT ============
 const keys = {};
 const mouse = { x: 0, y: 0, click: false, justClicked: false };
-window.addEventListener('keydown', e => keys[e.key] = true);
+window.addEventListener('keydown', e => { if (e.target.tagName === 'INPUT') return; keys[e.key] = true; });
 window.addEventListener('keyup', e => keys[e.key] = false);
 display.addEventListener('mousemove', e => {
   const r = display.getBoundingClientRect();
@@ -398,8 +434,245 @@ function startGame() {
   aiBrain.wh = aiBrain.rmat(aiBrain.hid, aiBrain.ins); aiBrain.bh = new Float32Array(aiBrain.hid);
   aiBrain.wo = aiBrain.rmat(aiBrain.outs, aiBrain.hid); aiBrain.bo = new Float32Array(aiBrain.outs);
   bullets = []; particles = [];
-  resetAI(); gameState = 'playing';
+  resetAI(); geminiReset(); gameState = 'playing';
 }
+
+// ============ GEMINI STRATEGIST ============
+// Slow "strategic" brain on top of the fast neural-net reflexes.
+// Every few seconds Gemini gets a match summary and returns a plan
+// (where to position, what to avoid), a taunt, and a prediction.
+const $ = id => document.getElementById(id);
+const CELL_NAMES = [];
+for (let r = 0; r < 4; r++) for (let c = 0; c < 4; c++) CELL_NAMES.push(`${'ABCD'[r]}${c + 1}`); // A1 = top-left, D4 = bottom-right
+
+const gemini = {
+  key: '', model: 'gemini-2.5-flash',
+  busy: false, lastCall: -9999, backoffUntil: 0,
+  events: [],            // things that happened since the last call
+  attackCounts: new Array(16).fill(0),
+  hitCounts: new Array(16).fill(0),
+  hitCells: new Array(16).fill(0),
+  prevPlan: null, hitsDuringPlan: 0,
+  plan: null,            // { target: cellIdx|-1, avoid: [cellIdx], strength }
+  prediction: null, predTotal: 0, predRight: 0,
+  taunt: '', tauntTimer: 0,
+  reportDone: false,
+};
+
+const SYSTEM_PROMPT = `You are the strategic mind of a small AI ship in a bullet-hell arena. A human plays the BOSS and fires attack patterns at you.
+Your low-level reflexes (a tiny neural net) dodge bullets frame by frame. YOU decide the high-level plan every few seconds.
+The arena is a 4x4 grid: rows A (top) to D (bottom), columns 1 (left) to 4 (right). The boss sits above row A and fires from there.
+Pattern notes: Rain/Checker/Barrage fall from the top (lower rows give more reaction time). Spiral/Diamond/Cross/Dbl Spiral/Tri Spiral come from the center (B2,B3,C2,C3) outward - corners are safer. Sweep comes from the sides. Aimed/Sniper target you from the top. Cage and X-Strike spawn AROUND your current position - keep moving. Homing chases you. Bounce ricochets.
+The human can "zone lock" a cell, which damages you while you stand in it.
+Study the human's habits (which attacks they spam, in what order, where they zone lock) and outsmart them.
+Respond ONLY with JSON. Keep "thought" to 1-2 sentences of genuine reasoning about the human's behavior. Keep "taunt" under 12 words, cocky and playful, referencing what they actually did. "predicted_attack" must be one of the attack names given.`;
+
+const RESPONSE_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    thought: { type: 'STRING' },
+    taunt: { type: 'STRING' },
+    plan: { type: 'STRING', description: 'short plan label, e.g. "Hug bottom corners"' },
+    target_cell: { type: 'STRING', description: 'grid cell to hold, e.g. D1, or NONE to roam' },
+    avoid_cells: { type: 'ARRAY', items: { type: 'STRING' } },
+    commitment: { type: 'NUMBER', description: '0-1, how strongly to hold the target cell' },
+    predicted_attack: { type: 'STRING' },
+  },
+  required: ['thought', 'taunt', 'plan', 'target_cell', 'avoid_cells', 'commitment', 'predicted_attack'],
+};
+
+function geminiLoad() {
+  try { gemini.key = localStorage.getItem('gemini_key') || ''; gemini.model = localStorage.getItem('gemini_model') || gemini.model; } catch (e) {}
+  $('gkey').value = gemini.key; $('gmodel').value = gemini.model;
+  geminiStatus();
+}
+function geminiStatus(kind, text) {
+  const el = $('gstatus');
+  el.className = kind || (gemini.key ? 'on' : '');
+  el.textContent = text || (gemini.key ? 'online' : 'offline');
+  $('keyrow').classList.toggle('hidden', !!gemini.key);
+}
+$('gsave').onclick = () => {
+  gemini.key = $('gkey').value.trim(); gemini.model = $('gmodel').value.trim() || 'gemini-2.5-flash';
+  try { localStorage.setItem('gemini_key', gemini.key); localStorage.setItem('gemini_model', gemini.model); } catch (e) {}
+  geminiStatus(); $('gkey').blur(); $('gmodel').blur();
+};
+$('changekey').onclick = () => { $('keyrow').classList.remove('hidden'); };
+
+function geminiReset() {
+  gemini.events = []; gemini.attackCounts.fill(0); gemini.hitCounts.fill(0); gemini.hitCells.fill(0);
+  gemini.prevPlan = null; gemini.plan = null; gemini.hitsDuringPlan = 0;
+  gemini.prediction = null; gemini.predTotal = 0; gemini.predRight = 0;
+  gemini.taunt = ''; gemini.tauntTimer = 0; gemini.reportDone = false; gemini.lastCall = -9999;
+  $('thoughts').innerHTML = ''; $('taunt').textContent = gemini.key ? 'Let\'s see what you\'ve got.' : '…';
+  $('plan').textContent = '—'; $('predict').textContent = '—';
+}
+
+function geminiEvent(text) {
+  gemini.events.push(`[${(frameCount / 60).toFixed(0)}s] ${text}`);
+  if (gemini.events.length > 25) gemini.events.shift();
+}
+function geminiOnAttack(i) {
+  gemini.attackCounts[i]++;
+  geminiEvent(`Boss fired ${PATTERNS[i].name}`);
+  if (gemini.prediction) {
+    gemini.predTotal++;
+    const right = gemini.prediction.toLowerCase() === PATTERNS[i].name.toLowerCase();
+    if (right) { gemini.predRight++; showTaunt('Called it.'); }
+    $('predict').innerHTML = `${gemini.prediction} → actual: ${PATTERNS[i].name} ${right ? '<b style="color:#0f0">✓</b>' : '<span style="color:#f44">✗</span>'}<br><span style="color:#555">accuracy ${gemini.predRight}/${gemini.predTotal}</span>`;
+    gemini.prediction = null;
+  }
+}
+function geminiOnHit(patternId, cell, source) {
+  if (patternId >= 0) gemini.hitCounts[patternId]++;
+  if (cell >= 0) gemini.hitCells[cell]++;
+  gemini.hitsDuringPlan++;
+  geminiEvent(`AI got hit by ${source} in ${CELL_NAMES[cell] || '?'} (HP ${Math.max(0, aiHP)}/${aiMaxHP})`);
+}
+function geminiOnZone(cell) { geminiEvent(`Boss zone-locked ${CELL_NAMES[cell]}`); }
+function geminiOnDeath() { geminiEvent(`AI DIED (generation ${aiGen})`); gemini.lastCall = -9999; } // re-plan right after respawn
+
+function parseCell(name) {
+  if (!name) return -1;
+  const i = CELL_NAMES.indexOf(String(name).trim().toUpperCase());
+  return i;
+}
+
+async function geminiRequest(prompt, schema) {
+  const body = {
+    systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    generationConfig: { temperature: 0.9, ...(schema ? { responseMimeType: 'application/json', responseSchema: schema } : {}) },
+  };
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(gemini.model)}:generateContent`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': gemini.key },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) { const err = new Error(`HTTP ${res.status}`); err.status = res.status; err.detail = await res.text(); throw err; }
+  const data = await res.json();
+  const parts = data.candidates?.[0]?.content?.parts || [];
+  return parts.filter(p => !p.thought).map(p => p.text || '').join('');
+}
+
+function matchSummary() {
+  const unlocked = PATTERNS.map((p, i) => isUnlocked(i) ? p.name : null).filter(Boolean);
+  const usage = PATTERNS.map((p, i) => gemini.attackCounts[i] ? `${p.name} x${gemini.attackCounts[i]} (hit AI ${gemini.hitCounts[i]}x)` : null).filter(Boolean);
+  const danger = CELL_NAMES.map((n, i) => gemini.hitCells[i] ? `${n}:${gemini.hitCells[i]}` : null).filter(Boolean);
+  const locked = CELL_NAMES.filter((n, i) => blockedCells[i] > 0);
+  return [
+    `Boss HP: ${bossHP.toFixed(1)}% (you win when it hits 0). Your generation: ${aiGen}, HP ${aiHP}/${aiMaxHP}, alive for ${(aiSurviveTime / 60).toFixed(1)}s.`,
+    `You are currently in cell ${CELL_NAMES[getCellAt(aiX, aiY)] || '?'}.`,
+    `Attacks the boss can use now: ${unlocked.join(', ')}.`,
+    `Currently firing: ${activePattern >= 0 ? PATTERNS[activePattern].name : 'nothing'}.`,
+    `Boss attack history this match: ${usage.join('; ') || 'none yet'}.`,
+    `Cells where you have been hit (cell:count): ${danger.join(', ') || 'none'}.`,
+    `Currently zone-locked cells: ${locked.join(', ') || 'none'}.`,
+    gemini.prevPlan ? `Your previous plan was "${gemini.prevPlan}" and you took ${gemini.hitsDuringPlan} hits during it.` : 'This is your first plan.',
+    `Recent events:\n${gemini.events.join('\n') || '(none)'}`,
+  ].join('\n');
+}
+
+async function geminiThink() {
+  gemini.busy = true; gemini.lastCall = frameCount;
+  geminiStatus('busy', 'thinking…');
+  const prompt = matchSummary();
+  gemini.events = [];
+  try {
+    const out = JSON.parse(await geminiRequest(prompt, RESPONSE_SCHEMA));
+    const target = parseCell(out.target_cell);
+    gemini.plan = {
+      target,
+      avoid: (out.avoid_cells || []).map(parseCell).filter(c => c >= 0),
+      strength: Math.max(0, Math.min(1, Number(out.commitment) || 0.5)),
+    };
+    gemini.prevPlan = out.plan; gemini.hitsDuringPlan = 0;
+    gemini.prediction = out.predicted_attack || null;
+    $('plan').textContent = `${out.plan}${target >= 0 ? ` → hold ${CELL_NAMES[target]}` : ''}${gemini.plan.avoid.length ? `, avoid ${gemini.plan.avoid.map(c => CELL_NAMES[c]).join(' ')}` : ''}`;
+    if (gemini.prediction) $('predict').innerHTML = `${gemini.prediction}<br><span style="color:#555">accuracy ${gemini.predRight}/${gemini.predTotal}</span>`;
+    addThought(out.thought);
+    showTaunt(out.taunt);
+    geminiStatus();
+  } catch (e) {
+    console.warn('Gemini error', e, e.detail);
+    if (e.status === 429) { gemini.backoffUntil = performance.now() + 20000; geminiStatus('err', 'rate limited'); }
+    else if (e.status === 400 || e.status === 403) { geminiStatus('err', e.status === 403 ? 'bad key' : 'bad request'); gemini.backoffUntil = performance.now() + 30000; }
+    else if (e.status === 404) { geminiStatus('err', 'unknown model'); gemini.backoffUntil = performance.now() + 30000; }
+    else { geminiStatus('err', 'error'); gemini.backoffUntil = performance.now() + 8000; }
+  }
+  gemini.busy = false;
+}
+
+function addThought(text) {
+  if (!text) return;
+  const d = document.createElement('div'); d.className = 'thought';
+  d.innerHTML = `<div class="t">gen ${aiGen} · ${(frameCount / 60).toFixed(0)}s</div>`;
+  d.appendChild(document.createTextNode(text));
+  $('thoughts').prepend(d);
+  while ($('thoughts').children.length > 20) $('thoughts').lastChild.remove();
+}
+function showTaunt(text) {
+  if (!text) return;
+  gemini.taunt = text; gemini.tauntTimer = 240;
+  $('taunt').textContent = text;
+}
+
+const GEMINI_INTERVAL = 60 * 5; // frames between strategy calls
+function geminiTick() {
+  if (gemini.tauntTimer > 0) gemini.tauntTimer--;
+  if (!gemini.key || gemini.busy || !aiAlive || performance.now() < gemini.backoffUntil) return;
+  if (frameCount - gemini.lastCall >= GEMINI_INTERVAL) geminiThink();
+}
+
+async function geminiReport() {
+  if (gemini.reportDone || !gemini.key) return;
+  gemini.reportDone = true;
+  $('thoughts').innerHTML = '<div id="report">Writing post-match report…</div>';
+  const prompt = `The match is over: the AI beat the human boss after ${aiGen} generations and ${aiKills} deaths. Prediction accuracy: ${gemini.predRight}/${gemini.predTotal}.
+Full attack usage: ${PATTERNS.map((p, i) => gemini.attackCounts[i] ? `${p.name} x${gemini.attackCounts[i]} (hit AI ${gemini.hitCounts[i]}x)` : null).filter(Boolean).join('; ') || 'none'}.
+Write a short post-match report (max 90 words, plain text, no markdown) addressed to the human: what habits made them predictable, which attack was actually their most effective, and one concrete tip to beat you next time. Stay in character: confident but fair.`;
+  try { $('report').textContent = await geminiRequest(prompt); }
+  catch (e) { $('report').textContent = 'Report unavailable (' + e.message + ').'; }
+}
+
+// Strategic pull applied on top of the neural net's move: attract toward the
+// target cell, repel from avoid cells. Fades out when bullets are close so
+// reflexes always win in an emergency.
+function geminiSteer(state) {
+  const p = gemini.plan;
+  if (!p) return [0, 0];
+  let danger = 0; for (let d = 0; d < 8; d++) danger = Math.max(danger, state[4 + d]);
+  const calm = 1 - Math.min(1, danger * 1.4);
+  let sx = 0, sy = 0;
+  if (p.target >= 0) {
+    const [tx, ty] = getCellCenter(p.target);
+    const dx = tx - aiX, dy = ty - aiY, dist = Math.hypot(dx, dy);
+    if (dist > 6) { sx += dx / dist * p.strength * 0.7; sy += dy / dist * p.strength * 0.7; }
+  }
+  for (const c of p.avoid) {
+    const [cx, cy] = getCellCenter(c);
+    const dx = aiX - cx, dy = aiY - cy, dist = Math.hypot(dx, dy);
+    if (dist < CELL) { const f = (1 - dist / CELL) * 0.5; sx += dx / (dist || 1) * f; sy += dy / (dist || 1) * f; }
+  }
+  return [sx * calm, sy * calm];
+}
+
+function drawTauntBubble() {
+  if (gemini.tauntTimer <= 0 || !gemini.taunt || !aiAlive) return;
+  ctx.font = '6px monospace';
+  const words = gemini.taunt.split(' '); const lines = []; let line = '';
+  for (const w of words) { const t = line ? line + ' ' + w : w; if (ctx.measureText(t).width > 110) { lines.push(line); line = w; } else line = t; }
+  if (line) lines.push(line);
+  const bw = 118, bh = lines.length * 8 + 6;
+  const bx = Math.max(arX(), Math.min(arX() + AR.w - bw, aiX - bw / 2));
+  let by = aiY - 16 - bh; if (by < arY() - 30) by = aiY + 12;
+  ctx.globalAlpha = Math.min(1, gemini.tauntTimer / 30);
+  pxRect(bx, by, bw, bh, '#062828'); pxBorder(bx, by, bw, bh, '#0ff');
+  lines.forEach((l, i) => pxText(l, bx + 4, by + 9 + i * 8, '#dff', 6));
+  ctx.globalAlpha = 1;
+}
+
+geminiLoad();
 
 // ============ UPDATE ============
 function update() {
@@ -417,6 +690,7 @@ function update() {
   }
 
   shakeAmt *= 0.9;
+  geminiTick();
 
   // Particles
   for (let i = particles.length - 1; i >= 0; i--) { const p = particles[i]; p.x += p.vx; p.y += p.vy; p.vx *= 0.95; p.vy *= 0.95; p.life--; if (p.life <= 0) particles.splice(i, 1); }
@@ -437,6 +711,7 @@ function update() {
     const cell = getCellAt(mouse.x, mouse.y);
     if (cell >= 0) {
       blockedCells[cell] = ZONE_BLOCK_DURATION;
+      geminiOnZone(cell);
       zoneCooldown = ZONE_COOLDOWN;
       zoneMode = false;
       spawnPx(...getCellCenter(cell), '#f44', 10);
@@ -463,6 +738,7 @@ function update() {
       if (keys[k] && isUnlocked(i) && patternCooldowns[i] <= 0) {
         keys[k] = false;
         activePattern = i; patternTimer = PATTERN_DURATION; patternCooldowns[i] = PATTERNS[i].cd;
+        geminiOnAttack(i);
       }
     }
   }
@@ -499,11 +775,12 @@ function update() {
       spawnPx(aiX, aiY, aiHP <= 0 ? '#f44' : '#ff0', aiHP <= 0 ? 20 : 8);
       shakeAmt = aiHP <= 0 ? 8 : 3; bullets.splice(i, 1);
       const hitP = activePattern >= 0 ? activePattern : lastPatternUsed;
+      geminiOnHit(hitP, getCellAt(aiX, aiY), hitP >= 0 ? PATTERNS[hitP].name : 'bullet');
       for (let j = Math.max(0, recentStates.length - 12); j < recentStates.length; j++)
         aiBrain.addSample(recentStates[j], recentActions[j], false, recentPatterns[j]);
       aiBrain.train(60 + aiGen * 15, hitP);
       if (aiHP <= 0) {
-        aiAlive = false; aiDeadTimer = 80; aiKills++;
+        aiAlive = false; aiDeadTimer = 80; aiKills++; geminiOnDeath();
         aiBestSurvive = Math.max(aiBestSurvive, aiSurviveTime);
         recentStates = []; recentActions = []; recentPatterns = [];
       } else { iFrames = 40; }
@@ -519,6 +796,7 @@ function update() {
       aiHP--;
       spawnPx(aiX, aiY, aiHP <= 0 ? '#f44' : '#f80', aiHP <= 0 ? 20 : 5);
       shakeAmt = aiHP <= 0 ? 8 : 2;
+      geminiOnHit(-1, getCellAt(aiX, aiY), 'zone lock');
       // Learn: being in a blocked zone is bad
       if (recentStates.length > 0) {
         for (let j = Math.max(0, recentStates.length - 6); j < recentStates.length; j++)
@@ -526,7 +804,7 @@ function update() {
         aiBrain.train(30, -1);
       }
       if (aiHP <= 0) {
-        aiAlive = false; aiDeadTimer = 80; aiKills++;
+        aiAlive = false; aiDeadTimer = 80; aiKills++; geminiOnDeath();
         aiBestSurvive = Math.max(aiBestSurvive, aiSurviveTime);
         recentStates = []; recentActions = []; recentPatterns = [];
         return;
@@ -567,8 +845,9 @@ function update() {
     }
   }
 
-  aiVX = (ddx + repX) * genSpeed;
-  aiVY = (ddy + repY) * genSpeed;
+  const [gsx, gsy] = geminiSteer(state);
+  aiVX = (ddx + repX + gsx) * genSpeed;
+  aiVY = (ddy + repY + gsy) * genSpeed;
   aiX += aiVX; aiY += aiVY;
   aiX = Math.max(bx + aiSize + 1, Math.min(bx + AR.w - aiSize - 1, aiX));
   aiY = Math.max(by + aiSize + 1, Math.min(by + AR.h - aiSize - 1, aiY));
@@ -586,7 +865,7 @@ function update() {
   if (aiSurviveTime % 60 === 0 && activePattern >= 0) {
     const dmg = 0.3 + aiGen * 0.12;
     bossHP = Math.max(0, bossHP - dmg);
-    if (bossHP <= 0) { gameState = 'gameOver'; spawnPx(IW / 2, 40, '#f44', 30); shakeAmt = 15; }
+    if (bossHP <= 0) { gameState = 'gameOver'; geminiReport(); spawnPx(IW / 2, 40, '#f44', 30); shakeAmt = 15; }
   }
 }
 
@@ -671,6 +950,7 @@ function render() {
   // Particles
   for (const p of particles) { ctx.globalAlpha = p.life / 30; pxRect(p.x, p.y, p.r, p.r, p.c); }
   ctx.globalAlpha = 1;
+  drawTauntBubble();
   ctx.restore();
 
   // ---- Pattern menu (right) ----
@@ -708,6 +988,7 @@ function render() {
       pxText(`[${k}] ${p.name}`, menuX + 2, py2 + 9, hover ? '#fff' : '#aaa', 6);
       if (hover && mouse.justClicked) {
         activePattern = i; patternTimer = PATTERN_DURATION; patternCooldowns[i] = p.cd;
+        geminiOnAttack(i);
       }
     }
     if (unlocked) for (let d = 0; d < 3; d++) pxRect(menuX + 98 + d * 4, py2 + 3, 2, 2, d < knownLevel ? '#0ff' : '#222');
@@ -769,7 +1050,7 @@ function renderTitle() {
   pxTextCenter('Kill the AI before it learns to beat you', IW / 2, IH / 2 + 20, '#888', 6);
   pxTextCenter('[1-9,0,-,=,a,z,e] Fire attacks | [Q] Zone Lock', IW / 2, IH / 2 + 33, '#666', 6);
   pxTextCenter('Zone Lock: block a grid cell to trap the AI', IW / 2, IH / 2 + 46, '#666', 6);
-  pxTextCenter('The AI recognizes patterns and adapts fast', IW / 2, IH / 2 + 59, '#666', 6);
+  pxTextCenter(gemini.key ? 'Gemini is watching your habits...' : 'The AI recognizes patterns and adapts fast', IW / 2, IH / 2 + 59, gemini.key ? '#0ff' : '#666', 6);
   if (Math.floor(frameCount / 30) % 2 === 0) pxTextCenter('PRESS ENTER', IW / 2, IH / 2 + 80, '#fff', 8);
   drawSprite(aiSprite, IW / 2 - 4, IH / 2 + 93, 1); pxTextCenter('vs', IW / 2, IH / 2 + 90, '#555', 6);
 }

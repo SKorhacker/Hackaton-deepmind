@@ -1,0 +1,856 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>The Game Master</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #0a0010; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; gap: 16px; font-family: ui-monospace, Menlo, monospace; color: #ccc; }
+canvas { image-rendering: pixelated; image-rendering: crisp-edges; }
+#brain { width: 320px; height: min(92vh, 640px); display: flex; flex-direction: column; gap: 10px; background: #120a1e; border: 1px solid #2a1f3d; border-radius: 8px; padding: 12px; font-size: 12px; }
+#brain h2 { font-size: 13px; color: #f0f; letter-spacing: 1px; display: flex; justify-content: space-between; align-items: center; }
+#gstatus { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: #222; color: #888; }
+#gstatus.on { background: #033; color: #0ff; }
+#gstatus.busy { background: #330; color: #ff0; }
+#gstatus.err { background: #300; color: #f66; }
+#keyrow { display: flex; flex-direction: column; gap: 6px; }
+#keyrow input { background: #0a0612; border: 1px solid #333; color: #ddd; padding: 5px 6px; border-radius: 4px; font: inherit; }
+#keyrow button { background: #f0f; color: #000; border: 0; padding: 5px; border-radius: 4px; font: inherit; font-weight: bold; cursor: pointer; }
+#keyrow.hidden { display: none; }
+.label { color: #666; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 3px; }
+#taunt { color: #fff; font-size: 13px; background: #2a0a2a; border-left: 3px solid #f0f; padding: 8px; border-radius: 4px; min-height: 36px; }
+#rules { display: flex; flex-direction: column; gap: 4px; min-height: 20px; }
+.rule { padding: 4px 6px; border-radius: 4px; background: #1a1026; border-left: 3px solid; }
+.rule b { letter-spacing: 1px; }
+.rule span { color: #888; font-size: 11px; }
+#thoughts { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.thought { color: #9ab; line-height: 1.4; border-left: 2px solid #334; padding-left: 8px; }
+.thought:first-child { color: #cde; border-color: #f0f; }
+.thought .t { color: #555; font-size: 10px; }
+#report { color: #ddd; line-height: 1.5; white-space: pre-wrap; }
+#changekey { color: #555; font-size: 10px; cursor: pointer; text-decoration: underline; background: none; border: 0; text-align: left; }
+</style>
+</head>
+<body>
+<canvas id="display"></canvas>
+<div id="brain">
+  <h2>GEMINI GAME MASTER <span id="gstatus">offline</span></h2>
+  <div id="keyrow">
+    <input id="gkey" type="password" placeholder="Gemini API key" autocomplete="off">
+    <input id="gmodel" type="text" placeholder="model" value="gemini-2.5-flash">
+    <button id="gsave">Connect</button>
+    <div style="color:#555;font-size:10px">Key is stored only in this browser (localStorage). Without a key the Game Master uses offline heuristics.</div>
+  </div>
+  <div><div class="label">Says</div><div id="taunt">…</div></div>
+  <div><div class="label">Active rules</div><div id="rules"><span style="color:#555">none — baseline phase</span></div></div>
+  <div class="label">Thinking</div>
+  <div id="thoughts"></div>
+  <button id="changekey">change API key</button>
+</div>
+<script>
+// ============ PIXEL SETUP ============
+const IW = 480, IH = 360;
+const display = document.getElementById('display');
+const dctx = display.getContext('2d');
+const buffer = document.createElement('canvas'); buffer.width = IW; buffer.height = IH;
+const ctx = buffer.getContext('2d');
+const dark = document.createElement('canvas'); dark.width = IW; dark.height = IH;
+const dk = dark.getContext('2d');
+let scale = 1;
+function resize() {
+  scale = Math.max(1, Math.min(Math.floor((window.innerWidth - 360) / IW), Math.floor(window.innerHeight / IH)));
+  display.width = IW * scale; display.height = IH * scale;
+  dctx.imageSmoothingEnabled = false;
+}
+resize(); window.addEventListener('resize', resize);
+
+// ============ INPUT ============
+const keys = {};
+window.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  keys[e.key] = true;
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].includes(e.key)) e.preventDefault();
+});
+window.addEventListener('keyup', e => { keys[e.key] = false; });
+function consume(k) { if (keys[k]) { keys[k] = false; return true; } return false; }
+
+// ============ DRAW HELPERS ============
+function pxRect(x, y, w, h, c) { ctx.fillStyle = c; ctx.fillRect(Math.floor(x), Math.floor(y), Math.ceil(w), Math.ceil(h)); }
+function pxBorder(x, y, w, h, c) { ctx.strokeStyle = c; ctx.lineWidth = 1; ctx.strokeRect(Math.floor(x) + 0.5, Math.floor(y) + 0.5, w - 1, h - 1); }
+function pxText(s, x, y, c, size = 7, align = 'left') { ctx.fillStyle = c; ctx.font = `${size}px monospace`; ctx.textAlign = align; ctx.fillText(s, Math.floor(x), Math.floor(y)); ctx.textAlign = 'left'; }
+function wrap(s, maxW, size) {
+  ctx.font = `${size}px monospace`;
+  const lines = []; let line = '';
+  for (const w of String(s).split(/\s+/)) {
+    const t = line ? line + ' ' + w : w;
+    if (ctx.measureText(t).width > maxW && line) { lines.push(line); line = w; } else line = t;
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+// ============ ARENA ============
+const AX = 80, AY = 40, AW = 320, AH = 300;
+const GRID = 4, CW = AW / GRID, CH = AH / GRID;
+const CELL_NAMES = [];
+for (let r = 0; r < GRID; r++) for (let c = 0; c < GRID; c++) CELL_NAMES.push(`${'ABCD'[r]}${c + 1}`); // A = top row, 1 = left column
+function cellAt(x, y) {
+  const c = Math.floor((x - AX) / CW), r = Math.floor((y - AY) / CH);
+  if (c < 0 || c >= GRID || r < 0 || r >= GRID) return -1;
+  return r * GRID + c;
+}
+
+// ============ RULES ============
+// Fixed catalogue. Anything Gemini returns is validated and clamped against this.
+const RULES = {
+  inverted_controls: { name: 'INVERTED', color: '#f0f', params: { axes: { t: 'enum', o: ['x', 'y', 'both'], d: 'both' } },
+    desc: p => `controls flipped (${p.axes})` },
+  gravity: { name: 'GRAVITY', color: '#fa0', params: { dir: { t: 'enum', o: ['down', 'up', 'left', 'right'], d: 'down' }, strength: { t: 'num', min: 0.3, max: 1.0, d: 0.6 } },
+    desc: p => `pulls ${p.dir} (${p.strength.toFixed(1)})` },
+  shrinking_arena: { name: 'SHRINK', color: '#f44', params: { min_size: { t: 'num', min: 0.45, max: 0.9, d: 0.6 } },
+    desc: p => `arena shrinks to ${Math.round(p.min_size * 100)}%` },
+  ice_physics: { name: 'ICE', color: '#8ff', params: { slipperiness: { t: 'num', min: 0.5, max: 0.95, d: 0.8 } },
+    desc: p => `slippery floor (${Math.round(p.slipperiness * 100)}%)` },
+  darkness: { name: 'DARKNESS', color: '#88a', params: { radius: { t: 'num', min: 30, max: 100, d: 55, int: true } },
+    desc: p => `vision radius ${p.radius}px` },
+  mirror_screen: { name: 'MIRROR', color: '#c8f', params: { axis: { t: 'enum', o: ['x', 'y'], d: 'x' } },
+    desc: p => `screen flipped on ${p.axis}` },
+  lava_cells: { name: 'LAVA', color: '#f60', params: { cells: { t: 'cells', max: 4, d: ['D2', 'D3'] } },
+    desc: p => `lava on ${p.cells.map(c => CELL_NAMES[c]).join(' ')}` },
+  bullet_speed_up: { name: 'FAST SHOTS', color: '#ff4', params: { multiplier: { t: 'num', min: 1.1, max: 1.7, d: 1.3 } },
+    desc: p => `bullets x${p.multiplier.toFixed(2)}` },
+  giant_player: { name: 'GIANT', color: '#4f4', params: { scale: { t: 'num', min: 1.5, max: 3, d: 2 } },
+    desc: p => `hitbox x${p.scale.toFixed(1)}` },
+  input_delay_ms: { name: 'LAG', color: '#aaa', params: { ms: { t: 'num', min: 60, max: 350, d: 180, int: true } },
+    desc: p => `${p.ms}ms input delay` },
+  no_shooting_zone: { name: 'NO FIRE', color: '#48f', params: { region: { t: 'enum', o: ['bottom_half', 'top_half', 'left_half', 'right_half'], d: 'bottom_half' } },
+    desc: p => `can't shoot in ${p.region.replace('_', ' ')}` },
+  boss_teleport: { name: 'TELEPORT', color: '#f8f', params: { interval_s: { t: 'num', min: 1.5, max: 6, d: 3 } },
+    desc: p => `boss blinks every ${p.interval_s.toFixed(1)}s` },
+  mercy_extra_life: { name: '+1 LIFE', color: '#0f8', mercy: true, params: {}, desc: () => 'mercy: extra life' },
+  mercy_slow_bullets: { name: 'SLOW SHOTS', color: '#0f8', mercy: true, params: { multiplier: { t: 'num', min: 0.5, max: 0.9, d: 0.75 } },
+    desc: p => `mercy: bullets x${p.multiplier.toFixed(2)}` },
+  mercy_shield: { name: 'SHIELD', color: '#0f8', mercy: true, params: { hits: { t: 'num', min: 1, max: 2, d: 1, int: true } },
+    desc: p => `mercy: shield (${p.hits} hit${p.hits > 1 ? 's' : ''})` },
+};
+const RULE_IDS = Object.keys(RULES);
+
+function sanitizeRules(raw) {
+  const out = [], rejected = [];
+  let hard = 0, mercy = 0;
+  for (const r of Array.isArray(raw) ? raw : []) {
+    const id = String(r && r.id || '').trim().toLowerCase();
+    const spec = RULES[id];
+    if (!spec) { rejected.push(`${id || '?'} (unknown)`); continue; }
+    if (out.some(o => o.id === id)) { rejected.push(`${id} (duplicate)`); continue; }
+    if (spec.mercy ? mercy >= 1 : hard >= 2) { rejected.push(`${id} (limit)`); continue; }
+    const src = (r.params && typeof r.params === 'object') ? { ...r, ...r.params } : r;
+    const params = {};
+    for (const [k, ps] of Object.entries(spec.params)) {
+      const v = src[k];
+      if (ps.t === 'num') {
+        let n = Number(v); if (v === undefined || v === null || !isFinite(n)) n = ps.d;
+        n = Math.max(ps.min, Math.min(ps.max, n)); if (ps.int) n = Math.round(n);
+        params[k] = n;
+      } else if (ps.t === 'enum') {
+        const s = String(v ?? '').toLowerCase();
+        params[k] = ps.o.includes(s) ? s : ps.d;
+      } else if (ps.t === 'cells') {
+        const arr = (Array.isArray(v) ? v : []).map(c => CELL_NAMES.indexOf(String(c).trim().toUpperCase())).filter(c => c >= 0);
+        let cells = [...new Set(arr)].slice(0, ps.max);
+        if (!cells.length) cells = ps.d.map(c => CELL_NAMES.indexOf(c));
+        params[k] = cells;
+      }
+    }
+    out.push({ id, params });
+    if (spec.mercy) mercy++; else hard++;
+  }
+  return { rules: out, rejected };
+}
+
+let activeRules = [];
+function rule(id) { const r = activeRules.find(r => r.id === id); return r ? r.params : null; }
+function ruleLabel(r) { return `${RULES[r.id].name}: ${RULES[r.id].desc(r.params)}`; }
+
+// ============ GAME STATE ============
+let gameState = 'title'; // title | play | card | win | lose
+let frameCount = 0, shake = 0;
+const player = { x: 0, y: 0, vx: 0, vy: 0, r: 3 };
+let lives = 5, iframes = 0, shield = 0, shootCd = 0;
+let shots = [], bullets = [], particles = [];
+const boss = { x: 0, y: 0, tx: 0, ty: 0, w: 34, h: 22, hp: 400, maxHp: 400, flash: 0, tpTimer: 0 };
+let phase = 1, phaseTimer = 0, thresholdIdx = 0;
+const THRESHOLDS = [0.75, 0.5, 0.25];
+const PHASE_LEN = 60 * 20, FIRST_PHASE_LEN = 60 * 14;
+let patternIdx = 0, patternTimer = 0;
+let inputQueue = [];
+let card = null, pendingPlan = null;
+let phaseHistory = [];
+let totalHits = 0;
+let tel;
+function newTel() {
+  return { cellTime: new Array(16).fill(0), dir: { up: 0, down: 0, left: 0, right: 0 }, still: 0, moving: 0, dirChanges: 0, lastDir: '',
+    shotsFired: 0, shotsHit: 0, hits: [], dmg: 0 };
+}
+
+const PATTERNS = ['Rain', 'Spiral', 'Aimed Fan', 'Walls'];
+
+function resetGame() {
+  player.x = AX + AW / 2; player.y = AY + AH - 30; player.vx = player.vy = 0;
+  lives = 5; iframes = 0; shield = 0; shootCd = 0;
+  shots = []; bullets = []; particles = [];
+  boss.x = boss.tx = AX + AW / 2; boss.y = boss.ty = AY + 30; boss.hp = boss.maxHp; boss.tpTimer = 0;
+  phase = 1; phaseTimer = 0; thresholdIdx = 0; patternIdx = 0; patternTimer = 0;
+  inputQueue = []; card = null; pendingPlan = null; gemini.token++; phaseHistory = []; totalHits = 0;
+  activeRules = []; tel = newTel();
+  geminiReset();
+  renderRulesPanel();
+  gameState = 'play';
+}
+
+// ============ ARENA BOUNDS (shrinking) ============
+function bounds() {
+  const s = rule('shrinking_arena');
+  let f = 1;
+  if (s) f = 1 - (1 - s.min_size) * Math.min(1, phaseTimer / 300);
+  const w = AW * f, h = AH * f;
+  const cx = AX + AW / 2, cy = AY + AH / 2;
+  return { x0: cx - w / 2, y0: cy - h / 2, x1: cx + w / 2, y1: cy + h / 2 };
+}
+function inNoFire(x, y) {
+  const n = rule('no_shooting_zone'); if (!n) return false;
+  if (n.region === 'bottom_half') return y > AY + AH / 2;
+  if (n.region === 'top_half') return y < AY + AH / 2;
+  if (n.region === 'left_half') return x < AX + AW / 2;
+  return x > AX + AW / 2;
+}
+function bulletMult() {
+  const f = rule('bullet_speed_up'), m = rule('mercy_slow_bullets');
+  return (f ? f.multiplier : 1) * (m ? m.multiplier : 1) * (1 + (phase - 1) * 0.05);
+}
+
+// ============ PARTICLES ============
+function burst(x, y, c, n) {
+  for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2, s = 0.5 + Math.random() * 2; particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s, life: 20 + Math.random() * 15, c }); }
+}
+
+// ============ BOSS PATTERNS ============
+function firePattern() {
+  const t = patternTimer, bx = boss.x, by = boss.y + boss.h / 2;
+  const hard = Math.min(3, phase - 1);
+  switch (patternIdx) {
+    case 0: // Rain
+      if (t % Math.max(4, 8 - hard) === 0) bullets.push({ x: AX + 4 + Math.random() * (AW - 8), y: AY + 2, vx: 0, vy: 1.3, r: 2, c: '#f44' });
+      break;
+    case 1: // Spiral
+      if (t % 5 === 0) {
+        const arms = 1 + Math.min(2, hard);
+        for (let a = 0; a < arms; a++) { const ang = t * 0.11 + a * Math.PI * 2 / arms; bullets.push({ x: bx, y: by, vx: Math.cos(ang) * 1.2, vy: Math.sin(ang) * 1.2, r: 2, c: '#f80' }); }
+      }
+      break;
+    case 2: // Aimed fan
+      if (t % 40 === 0) {
+        const ang = Math.atan2(player.y - by, player.x - bx), n = 2 + Math.min(1, hard);
+        for (let i = -n; i <= n; i++) { const a = ang + i * 0.22; bullets.push({ x: bx, y: by, vx: Math.cos(a) * 1.9, vy: Math.sin(a) * 1.9, r: 2, c: '#ff4' }); }
+      }
+      break;
+    case 3: // Walls with a gap
+      if (t % 60 === 0) {
+        const gapW = 42 - hard * 4, gap = AX + 10 + Math.random() * (AW - gapW - 20);
+        for (let x = AX + 4; x < AX + AW; x += 10) if (x < gap || x > gap + gapW) bullets.push({ x, y: AY + 2, vx: 0, vy: 1.0, r: 2, c: '#f0f' });
+      }
+      break;
+  }
+}
+
+// ============ DAMAGE ============
+function hurt(src) {
+  if (iframes > 0) return;
+  if (shield > 0) { shield--; iframes = 45; burst(player.x, player.y, '#0f8', 10); return; }
+  lives--; iframes = 90; shake = 8; totalHits++;
+  tel.hits.push({ src, rules: activeRules.map(r => r.id) });
+  burst(player.x, player.y, '#f44', 18);
+  if (lives <= 0) { gameState = 'lose'; recordPhase(); geminiReport(false); }
+}
+
+// ============ UPDATE ============
+function updatePlay() {
+  phaseTimer++; patternTimer++;
+  if (iframes > 0) iframes--;
+  if (boss.flash > 0) boss.flash--;
+
+  // --- Player input (through the rule pipeline) ---
+  let dx = 0, dy = 0;
+  if (keys['ArrowLeft'] || keys['a'] || keys['A']) dx -= 1;
+  if (keys['ArrowRight'] || keys['d'] || keys['D']) dx += 1;
+  if (keys['ArrowUp'] || keys['w'] || keys['W']) dy -= 1;
+  if (keys['ArrowDown'] || keys['s'] || keys['S']) dy += 1;
+  // telemetry records what the human *pressed*
+  const dirName = (dy < 0 ? 'up' : dy > 0 ? 'down' : '') + (dx < 0 ? 'left' : dx > 0 ? 'right' : '');
+  if (dirName) {
+    tel.moving++;
+    if (dy < 0) tel.dir.up++; if (dy > 0) tel.dir.down++; if (dx < 0) tel.dir.left++; if (dx > 0) tel.dir.right++;
+    if (tel.lastDir && dirName !== tel.lastDir) tel.dirChanges++;
+    tel.lastDir = dirName;
+  } else tel.still++;
+
+  const inv = rule('inverted_controls');
+  if (inv) { if (inv.axes !== 'y') dx = -dx; if (inv.axes !== 'x') dy = -dy; }
+  if (dx && dy) { dx *= 0.707; dy *= 0.707; }
+  inputQueue.push([dx, dy]); if (inputQueue.length > 40) inputQueue.shift();
+  const lag = rule('input_delay_ms');
+  if (lag) { const d = Math.round(lag.ms / 16.67); [dx, dy] = inputQueue[Math.max(0, inputQueue.length - 1 - d)]; }
+
+  const speed = 2.3;
+  const ice = rule('ice_physics');
+  const control = ice ? 0.02 + 0.2 * (1 - ice.slipperiness) : 1;
+  player.vx += (dx * speed - player.vx) * control;
+  player.vy += (dy * speed - player.vy) * control;
+  let gx = 0, gy = 0;
+  const g = rule('gravity');
+  if (g) { const s = g.strength; if (g.dir === 'down') gy = s; if (g.dir === 'up') gy = -s; if (g.dir === 'left') gx = -s; if (g.dir === 'right') gx = s; }
+  player.x += player.vx + gx; player.y += player.vy + gy;
+  const giant = rule('giant_player');
+  player.r = 3 * (giant ? giant.scale : 1);
+  const b = bounds();
+  player.x = Math.max(b.x0 + player.r, Math.min(b.x1 - player.r, player.x));
+  player.y = Math.max(b.y0 + player.r, Math.min(b.y1 - player.r, player.y));
+  const cell = cellAt(player.x, player.y); if (cell >= 0) tel.cellTime[cell]++;
+
+  // --- Shooting ---
+  if (shootCd > 0) shootCd--;
+  if ((keys[' '] || keys['z'] || keys['Z']) && shootCd <= 0 && !inNoFire(player.x, player.y)) {
+    shots.push({ x: player.x, y: player.y - player.r - 2 }); shootCd = 6; tel.shotsFired++;
+  }
+  for (let i = shots.length - 1; i >= 0; i--) {
+    const s = shots[i]; s.y -= 5;
+    if (s.y < AY - 4) { shots.splice(i, 1); continue; }
+    if (Math.abs(s.x - boss.x) < boss.w / 2 && Math.abs(s.y - boss.y) < boss.h / 2) {
+      shots.splice(i, 1); boss.hp--; boss.flash = 3; tel.shotsHit++; tel.dmg++;
+      if (Math.random() < 0.3) burst(s.x, s.y, '#fff', 2);
+      if (boss.hp <= 0) { gameState = 'win'; burst(boss.x, boss.y, '#f0f', 60); shake = 15; recordPhase(); geminiReport(true); return; }
+    }
+  }
+
+  // --- Boss ---
+  const tp = rule('boss_teleport');
+  if (tp) {
+    boss.tpTimer++;
+    if (boss.tpTimer >= tp.interval_s * 60) {
+      boss.tpTimer = 0; burst(boss.x, boss.y, '#f8f', 12);
+      boss.x = boss.tx = AX + 30 + Math.random() * (AW - 60); boss.y = boss.ty = AY + 20 + Math.random() * 50;
+      burst(boss.x, boss.y, '#f8f', 12);
+    }
+  } else if (frameCount % 120 === 0) { boss.tx = AX + 40 + Math.random() * (AW - 80); boss.ty = AY + 26 + Math.random() * 16; }
+  boss.x += (boss.tx - boss.x) * 0.03; boss.y += (boss.ty - boss.y) * 0.03;
+
+  if (patternTimer >= 200) { patternTimer = 0; let n; do n = Math.floor(Math.random() * PATTERNS.length); while (n === patternIdx); patternIdx = n; }
+  if (patternTimer > 20) firePattern(); // short breather when switching
+
+  // --- Bullets ---
+  const m = bulletMult();
+  for (let i = bullets.length - 1; i >= 0; i--) {
+    const bl = bullets[i]; bl.x += bl.vx * m; bl.y += bl.vy * m;
+    if (bl.x < AX - 10 || bl.x > AX + AW + 10 || bl.y < AY - 10 || bl.y > AY + AH + 10) { bullets.splice(i, 1); continue; }
+    const ddx = bl.x - player.x, ddy = bl.y - player.y;
+    if (ddx * ddx + ddy * ddy < (player.r + bl.r - 0.5) ** 2) { bullets.splice(i, 1); hurt(PATTERNS[patternIdx]); if (gameState !== 'play') return; }
+  }
+
+  // --- Lava ---
+  const lava = rule('lava_cells');
+  if (lava && lava.cells.includes(cell)) hurt('Lava');
+  if (gameState !== 'play') return;
+
+  // --- Phase control: prefetch next rules ahead of time, then switch ---
+  const len = phase === 1 ? FIRST_PHASE_LEN : PHASE_LEN;
+  const hpFrac = boss.hp / boss.maxHp;
+  const thr = THRESHOLDS[thresholdIdx];
+  const nearEnd = len - phaseTimer < 60 * 7 || (thr !== undefined && hpFrac - thr < 0.07);
+  if (nearEnd && !pendingPlan && !gemini.busy) geminiPlan();
+  if (phaseTimer >= len || (thr !== undefined && hpFrac <= thr)) {
+    while (THRESHOLDS[thresholdIdx] !== undefined && hpFrac <= THRESHOLDS[thresholdIdx]) thresholdIdx++;
+    beginCard();
+  }
+}
+
+function recordPhase() {
+  const secs = phaseTimer / 60;
+  phaseHistory.push({ phase, rules: activeRules.map(ruleLabel), ids: activeRules.map(r => r.id), hits: tel.hits.length, dmg: tel.dmg, secs,
+    acc: tel.shotsFired ? tel.shotsHit / tel.shotsFired : 0 });
+}
+
+function beginCard() {
+  recordPhase();
+  bullets = []; shots = [];
+  gameState = 'card';
+  card = { t: 0, wait: 0, plan: null };
+}
+
+function updateCard() {
+  if (!card.plan) {
+    if (!pendingPlan && !gemini.busy && card.wait === 0) geminiPlan(); // prefetch missed: ask now
+    card.wait++;
+    if (pendingPlan) { card.plan = pendingPlan; pendingPlan = null; }
+    else if (!gemini.busy || card.wait >= 150) card.plan = heuristicPlan(); // no key / failed / too slow
+    else return;
+    announce(card.plan);
+  }
+  card.t++;
+  if (card.t >= 150) applyPlan(card.plan);
+}
+
+function applyPlan(plan) {
+  activeRules = plan.rules;
+  const extra = rule('mercy_extra_life'); if (extra) lives = Math.min(6, lives + 1);
+  const sh = rule('mercy_shield'); shield = sh ? sh.hits : 0;
+  phase++; phaseTimer = 0; patternTimer = 0; boss.tpTimer = 0;
+  inputQueue = []; player.vx = player.vy = 0;
+  tel = newTel();
+  card = null; pendingPlan = null; gemini.token++; // drop any late answer meant for this phase change
+  gameState = 'play';
+  renderRulesPanel();
+}
+
+// ============ OFFLINE HEURISTIC GAME MASTER ============
+const LINES = {
+  inverted_controls: 'Your reflexes are too good. Let\'s see them work backwards.',
+  gravity: 'You drift wherever you like. Now the floor has opinions.',
+  shrinking_arena: 'You love your personal space. I\'m taking it away.',
+  ice_physics: 'You stand still and wait for gaps. Try standing still on ice.',
+  darkness: 'You read my patterns from across the arena. Read them in the dark.',
+  mirror_screen: 'You know this arena by heart. Here\'s its reflection.',
+  lava_cells: 'You camp in the same cells. They are now lava.',
+  bullet_speed_up: 'You dodge with room to spare. I\'ll remove the room.',
+  giant_player: 'You thread tiny gaps. Enjoy being enormous.',
+  input_delay_ms: 'You react on instinct. Now your instincts arrive late.',
+  no_shooting_zone: 'You shoot me from safety. Safety is now a no-fire zone.',
+  boss_teleport: 'You aim at where I am. I\'m rarely there anymore.',
+};
+function heuristicPlan() {
+  const total = tel.cellTime.reduce((a, b) => a + b, 0) || 1;
+  const rowFrac = r => tel.cellTime.slice(r * 4, r * 4 + 4).reduce((a, b) => a + b, 0) / total;
+  const bottom = rowFrac(3) + rowFrac(2) * 0.5;
+  const stillFrac = tel.still / Math.max(1, tel.still + tel.moving);
+  const last = phaseHistory[phaseHistory.length - 1] || { hits: 0, ids: [] };
+  const w = {};
+  RULE_IDS.filter(id => !RULES[id].mercy).forEach(id => w[id] = 1);
+  if (bottom > 0.5) { w.no_shooting_zone += 3; w.lava_cells += 3; w.gravity += 1; }
+  if (stillFrac > 0.45) { w.ice_physics += 3; w.boss_teleport += 2; }
+  if (last.hits <= 1) { w.darkness += 2; w.bullet_speed_up += 2; w.input_delay_ms += 2; w.mirror_screen += 2; w.inverted_controls += 1; }
+  if (tel.shotsFired && tel.shotsHit / tel.shotsFired > 0.6) w.boss_teleport += 2;
+  for (const id of last.ids || []) if (w[id]) w[id] *= 0.15; // don't repeat
+  const pickN = phase >= 3 ? 2 : 1, picked = [];
+  for (let k = 0; k < pickN; k++) {
+    const ids = Object.keys(w).filter(id => !picked.includes(id));
+    const sum = ids.reduce((a, id) => a + w[id], 0); let r = Math.random() * sum;
+    for (const id of ids) { r -= w[id]; if (r <= 0) { picked.push(id); break; } }
+  }
+  const raw = picked.map(id => {
+    const p = { id };
+    if (id === 'lava_cells') p.cells = tel.cellTime.map((t, i) => [t, i]).sort((a, b) => b[0] - a[0]).slice(0, 3).map(x => CELL_NAMES[x[1]]);
+    if (id === 'no_shooting_zone') p.region = bottom > 0.5 ? 'bottom_half' : 'top_half';
+    if (id === 'gravity') p.dir = bottom > 0.5 ? 'up' : 'down';
+    return p;
+  });
+  if (lives <= 2) raw.push({ id: Math.random() < 0.5 ? 'mercy_shield' : 'mercy_slow_bullets' });
+  const { rules } = sanitizeRules(raw);
+  return {
+    source: 'offline',
+    rules,
+    announcement: LINES[rules[0].id] || 'New rules.',
+    reasoning: `Offline heuristic: ${Math.round(bottom * 100)}% time low in the arena, ${Math.round(stillFrac * 100)}% standing still, ${last.hits} hits last phase.`,
+    taunt: lives <= 2 ? 'Fine. A little mercy. A little.' : 'Adapt or perish.',
+    rejected: [],
+  };
+}
+
+// ============ GEMINI ============
+const $ = id => document.getElementById(id);
+const gemini = { key: '', model: 'gemini-2.5-flash', busy: false, token: 0, backoffUntil: 0, taunt: '', tauntTimer: 0, reportDone: false };
+
+function ruleCatalogText() {
+  return RULE_IDS.map(id => {
+    const ps = Object.entries(RULES[id].params).map(([k, p]) =>
+      p.t === 'num' ? `${k}: number ${p.min}-${p.max}` : p.t === 'enum' ? `${k}: one of ${p.o.join('|')}` : `${k}: up to ${p.max} grid cells like "D2"`).join(', ');
+    return `- ${id}${RULES[id].mercy ? ' (MERCY)' : ''}${ps ? ` {${ps}}` : ''}`;
+  }).join('\n');
+}
+
+const SYSTEM_PROMPT = `You are THE GAME MASTER: the boss of a bullet-hell game, and you control the RULES of the fight itself.
+A human dodges your bullets and shoots you. At each phase change you rewrite the rules to target exactly what the human is worst at, based on telemetry.
+The arena is a 4x4 grid: rows A (top, where you are) to D (bottom), columns 1 (left) to 4 (right).
+Available rules (use these exact ids; params are per-rule fields on each rule object):
+${ruleCatalogText()}
+Guidelines:
+- Pick 1 rule on phase 2, up to 2 non-mercy rules afterwards. Prefer rules that exploit their habits (where they sit, whether they stand still or jitter, how accurate they are) and rules they handled badly before. Avoid rules they handled well unless you make them harsher.
+- Add at most one MERCY rule, only if they have 2 or fewer lives or were crushed last phase. A good boss is hard but fair.
+- "announcement": dramatic, second person, max 22 words, must reference something they actually did and explain why this rule. E.g. "You dodge well... let's see you do it upside down."
+- "reasoning": 1-2 sentences of genuine analysis of the telemetry.
+- "taunt": max 10 words.
+Respond ONLY with JSON.`;
+
+function buildSchema() {
+  const props = { id: { type: 'STRING', enum: RULE_IDS } };
+  for (const id of RULE_IDS) for (const [k, p] of Object.entries(RULES[id].params))
+    props[k] = p.t === 'num' ? { type: 'NUMBER' } : p.t === 'enum' ? { type: 'STRING' } : { type: 'ARRAY', items: { type: 'STRING' } };
+  return {
+    type: 'OBJECT',
+    properties: {
+      announcement: { type: 'STRING' }, reasoning: { type: 'STRING' }, taunt: { type: 'STRING' },
+      rules: { type: 'ARRAY', items: { type: 'OBJECT', properties: props, required: ['id'] } },
+    },
+    required: ['announcement', 'reasoning', 'taunt', 'rules'],
+  };
+}
+const RESPONSE_SCHEMA = buildSchema();
+
+function geminiLoad() {
+  try { gemini.key = localStorage.getItem('gemini_key') || ''; gemini.model = localStorage.getItem('gemini_model') || gemini.model; } catch (e) {}
+  $('gkey').value = gemini.key; $('gmodel').value = gemini.model;
+  geminiStatus();
+}
+function geminiStatus(kind, text) {
+  const el = $('gstatus');
+  el.className = kind || (gemini.key ? 'on' : '');
+  el.textContent = text || (gemini.key ? 'online' : 'offline');
+  $('keyrow').classList.toggle('hidden', !!gemini.key);
+}
+$('gsave').onclick = () => {
+  gemini.key = $('gkey').value.trim(); gemini.model = $('gmodel').value.trim() || 'gemini-2.5-flash';
+  try { localStorage.setItem('gemini_key', gemini.key); localStorage.setItem('gemini_model', gemini.model); } catch (e) {}
+  gemini.backoffUntil = 0; geminiStatus(); $('gkey').blur(); $('gmodel').blur();
+};
+$('changekey').onclick = () => $('keyrow').classList.remove('hidden');
+
+function geminiReset() {
+  gemini.taunt = ''; gemini.tauntTimer = 0; gemini.reportDone = false;
+  $('thoughts').innerHTML = '';
+  showTaunt(gemini.key ? 'Show me how you play. Then I change the game.' : 'Show me how you play.');
+}
+
+async function geminiRequest(prompt, schema) {
+  const body = {
+    systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    generationConfig: { temperature: 1.0, ...(schema ? { responseMimeType: 'application/json', responseSchema: schema } : {}) },
+  };
+  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(gemini.model)}:generateContent`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': gemini.key }, body: JSON.stringify(body),
+  });
+  if (!res.ok) { const err = new Error(`HTTP ${res.status}`); err.status = res.status; err.detail = await res.text(); throw err; }
+  const data = await res.json();
+  return (data.candidates?.[0]?.content?.parts || []).filter(p => !p.thought).map(p => p.text || '').join('');
+}
+
+function telemetryText() {
+  const total = tel.cellTime.reduce((a, b) => a + b, 0) || 1;
+  const topCells = tel.cellTime.map((t, i) => [t, i]).sort((a, b) => b[0] - a[0]).slice(0, 4).filter(x => x[0] > 0)
+    .map(([t, i]) => `${CELL_NAMES[i]} ${Math.round(t / total * 100)}%`);
+  const rows = [0, 1, 2, 3].map(r => `${'ABCD'[r]} ${Math.round(tel.cellTime.slice(r * 4, r * 4 + 4).reduce((a, b) => a + b, 0) / total * 100)}%`);
+  const mv = tel.moving + tel.still || 1, d = tel.dir;
+  const dirs = Object.entries(d).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${k} ${Math.round(v / mv * 100)}%`).join(', ');
+  const hitsBy = {}; tel.hits.forEach(h => hitsBy[h.src] = (hitsBy[h.src] || 0) + 1);
+  const hist = phaseHistory.map(h => `Phase ${h.phase} [${h.rules.join('; ') || 'no rules'}]: took ${h.hits} hits, dealt ${h.dmg} dmg in ${h.secs.toFixed(0)}s, accuracy ${Math.round(h.acc * 100)}% -> ${h.hits <= 1 ? 'handled WELL' : h.hits >= 3 ? 'handled BADLY' : 'struggled a bit'}`);
+  return [
+    `Upcoming phase: ${phase + 1}. Boss HP ${Math.round(boss.hp / boss.maxHp * 100)}%. Player lives ${lives}${shield ? `, shield ${shield}` : ''}.`,
+    `Current rules: ${activeRules.map(ruleLabel).join('; ') || 'none'}.`,
+    `THIS PHASE so far (${(phaseTimer / 60).toFixed(0)}s):`,
+    `- Most time in cells: ${topCells.join(', ') || 'n/a'}. Rows: ${rows.join(', ')}.`,
+    `- Movement: standing still ${Math.round(tel.still / mv * 100)}% of the time, ${(tel.dirChanges / Math.max(1, phaseTimer / 60)).toFixed(1)} direction changes/sec (jittery if >2). Directions pressed: ${dirs}.`,
+    `- Shooting accuracy: ${tel.shotsFired ? Math.round(tel.shotsHit / tel.shotsFired * 100) : 0}% (${tel.shotsHit}/${tel.shotsFired}).`,
+    `- Hits taken: ${tel.hits.length} (${Object.entries(hitsBy).map(([k, v]) => `${k} x${v}`).join(', ') || 'none'}).`,
+    `History:\n${hist.join('\n') || '(first phase)'}`,
+  ].join('\n');
+}
+
+async function geminiPlan() {
+  if (!gemini.key || gemini.busy || performance.now() < gemini.backoffUntil) return;
+  gemini.busy = true; geminiStatus('busy', 'rewriting rules…');
+  const token = gemini.token;
+  try {
+    const out = JSON.parse(await geminiRequest(telemetryText(), RESPONSE_SCHEMA));
+    const { rules, rejected } = sanitizeRules(out.rules);
+    if (rejected.length) console.warn('Game Master: rejected rules', rejected);
+    if (token === gemini.token && (gameState === 'play' || gameState === 'card')) {
+      pendingPlan = rules.filter(r => !RULES[r.id].mercy).length
+        ? { source: 'gemini', rules, announcement: String(out.announcement || '').slice(0, 200), reasoning: String(out.reasoning || '').slice(0, 400), taunt: String(out.taunt || '').slice(0, 80), rejected }
+        : null; // no valid hard rule -> fall back
+    }
+    geminiStatus();
+  } catch (e) {
+    console.warn('Gemini error', e, e.detail);
+    if (e.status === 429) { gemini.backoffUntil = performance.now() + 20000; geminiStatus('err', 'rate limited'); }
+    else if (e.status === 403) { gemini.backoffUntil = performance.now() + 30000; geminiStatus('err', 'bad key'); }
+    else if (e.status === 400) { gemini.backoffUntil = performance.now() + 30000; geminiStatus('err', 'bad request'); }
+    else if (e.status === 404) { gemini.backoffUntil = performance.now() + 30000; geminiStatus('err', 'unknown model'); }
+    else { gemini.backoffUntil = performance.now() + 8000; geminiStatus('err', 'error'); }
+  }
+  gemini.busy = false;
+}
+
+function announce(plan) {
+  addThought(`${plan.reasoning}${plan.rejected && plan.rejected.length ? ` [rejected: ${plan.rejected.join(', ')}]` : ''}`, plan.source);
+  showTaunt(plan.taunt || plan.announcement);
+}
+function addThought(text, source) {
+  if (!text) return;
+  const d = document.createElement('div'); d.className = 'thought';
+  d.innerHTML = `<div class="t">phase ${phase + 1} · ${source === 'gemini' ? 'gemini' : 'offline heuristic'}</div>`;
+  d.appendChild(document.createTextNode(text));
+  $('thoughts').prepend(d);
+  while ($('thoughts').children.length > 20) $('thoughts').lastChild.remove();
+}
+function showTaunt(text) { if (!text) return; gemini.taunt = text; gemini.tauntTimer = 300; $('taunt').textContent = text; }
+function renderRulesPanel() {
+  const el = $('rules'); el.innerHTML = '';
+  if (!activeRules.length) { el.innerHTML = '<span style="color:#555">none — baseline phase</span>'; return; }
+  for (const r of activeRules) {
+    const d = document.createElement('div'); d.className = 'rule'; d.style.borderColor = RULES[r.id].color;
+    const b = document.createElement('b'); b.style.color = RULES[r.id].color; b.textContent = RULES[r.id].name + ' ';
+    const s = document.createElement('span'); s.textContent = RULES[r.id].desc(r.params);
+    d.append(b, s); el.appendChild(d);
+  }
+}
+
+async function geminiReport(won) {
+  if (gemini.reportDone) return;
+  gemini.reportDone = true;
+  const hist = phaseHistory.map(h => `Phase ${h.phase} [${h.rules.join('; ') || 'no rules'}]: ${h.hits} hits taken, ${h.dmg} dmg dealt`).join('\n');
+  if (!gemini.key) {
+    const worst = phaseHistory.slice().sort((a, b) => b.hits - a.hits)[0];
+    $('thoughts').innerHTML = '';
+    const d = document.createElement('div'); d.id = 'report';
+    d.textContent = `${won ? 'You beat the Game Master.' : 'The Game Master wins.'}\n\n${hist}\n\nToughest phase: ${worst ? `phase ${worst.phase} (${worst.rules.join(', ') || 'no rules'})` : 'n/a'}.`;
+    $('thoughts').appendChild(d);
+    return;
+  }
+  $('thoughts').innerHTML = '<div id="report">Writing post-match report…</div>';
+  const prompt = `The match is over: the human ${won ? 'DEFEATED you' : 'LOST to you'} after ${phase} phases, taking ${totalHits} hits.
+Phase history:\n${hist}
+Write a short post-match report (max 90 words, plain text, no markdown) addressed to the human: which rules broke them, which they mastered, and one concrete tip. Stay in character as the Game Master: theatrical but fair.`;
+  try { $('report').textContent = await geminiRequest(prompt); }
+  catch (e) { $('report').textContent = 'Report unavailable (' + e.message + ').'; }
+}
+
+// ============ MAIN UPDATE ============
+function update() {
+  frameCount++;
+  shake *= 0.9;
+  if (gemini.tauntTimer > 0) gemini.tauntTimer--;
+  for (let i = particles.length - 1; i >= 0; i--) { const p = particles[i]; p.x += p.vx; p.y += p.vy; p.vx *= 0.94; p.vy *= 0.94; if (--p.life <= 0) particles.splice(i, 1); }
+  if (gameState === 'title' || gameState === 'win' || gameState === 'lose') { if (consume('Enter')) resetGame(); return; }
+  if (gameState === 'play') updatePlay();
+  else if (gameState === 'card') updateCard();
+}
+
+// ============ RENDER ============
+function worldTransform(c) {
+  const mr = rule('mirror_screen');
+  if (!mr || gameState !== 'play') return;
+  const cx = AX + AW / 2, cy = AY + AH / 2;
+  if (mr.axis === 'x') { c.translate(cx, 0); c.scale(-1, 1); c.translate(-cx, 0); }
+  else { c.translate(0, cy); c.scale(1, -1); c.translate(0, -cy); }
+}
+function mapPt(x, y) {
+  const mr = rule('mirror_screen');
+  if (!mr || gameState !== 'play') return [x, y];
+  return mr.axis === 'x' ? [2 * (AX + AW / 2) - x, y] : [x, 2 * (AY + AH / 2) - y];
+}
+
+function drawBoss() {
+  const x = Math.floor(boss.x - boss.w / 2), y = Math.floor(boss.y - boss.h / 2);
+  const hit = boss.flash > 0;
+  pxRect(x + 4, y, boss.w - 8, boss.h, hit ? '#fff' : '#3a1450');
+  pxRect(x, y + 4, boss.w, boss.h - 8, hit ? '#fff' : '#3a1450');
+  pxBorder(x, y + 4, boss.w, boss.h - 8, '#f0f');
+  pxRect(x + 6, y - 5, 4, 5, '#f0f'); pxRect(x + boss.w - 10, y - 5, 4, 5, '#f0f'); // crown
+  pxRect(x + boss.w / 2 - 2, y - 7, 4, 7, '#ff4');
+  // eye tracks the player
+  const ex = boss.x + Math.max(-4, Math.min(4, (player.x - boss.x) * 0.03)), ey = boss.y + Math.max(-2, Math.min(3, (player.y - boss.y) * 0.02));
+  pxRect(boss.x - 7, boss.y - 4, 14, 8, '#fff');
+  pxRect(ex - 3, ey - 3, 6, 6, '#f0f'); pxRect(ex - 1, ey - 1, 2, 2, '#000');
+}
+
+function render() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  pxRect(0, 0, IW, IH, '#0a0010');
+  if (gameState === 'title') { renderTitle(); blit(); return; }
+
+  ctx.save();
+  if (shake > 0.5) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
+
+  // ---- world (can be mirrored) ----
+  ctx.save(); worldTransform(ctx);
+  pxRect(AX, AY, AW, AH, '#0c0818');
+  const ice = rule('ice_physics');
+  if (ice) { ctx.globalAlpha = 0.12; pxRect(AX, AY, AW, AH, '#8ff'); ctx.globalAlpha = 1; for (let i = 0; i < 14; i++) pxRect(AX + (i * 67) % AW, AY + (i * 41) % AH, 6, 1, '#4aa'); }
+  const nf = rule('no_shooting_zone');
+  if (nf) {
+    const r = nf.region === 'bottom_half' ? [AX, AY + AH / 2, AW, AH / 2] : nf.region === 'top_half' ? [AX, AY, AW, AH / 2] : nf.region === 'left_half' ? [AX, AY, AW / 2, AH] : [AX + AW / 2, AY, AW / 2, AH];
+    ctx.globalAlpha = 0.12; pxRect(...r, '#48f'); ctx.globalAlpha = 1;
+    for (let k = 0; k < r[2] + r[3]; k += 12) { ctx.globalAlpha = 0.18; ctx.strokeStyle = '#48f'; ctx.beginPath(); ctx.moveTo(r[0] + Math.min(k, r[2]), r[1] + Math.max(0, k - r[2])); ctx.lineTo(r[0] + Math.max(0, k - r[3]), r[1] + Math.min(k, r[3])); ctx.stroke(); ctx.globalAlpha = 1; }
+  }
+  const lava = rule('lava_cells') || (card && card.plan && card.plan.rules.find(r => r.id === 'lava_cells')?.params);
+  if (lava) for (const c of lava.cells) {
+    const cx = AX + (c % 4) * CW, cy = AY + Math.floor(c / 4) * CH;
+    ctx.globalAlpha = gameState === 'card' ? 0.2 + 0.2 * Math.sin(frameCount * 0.3) : 0.35 + 0.1 * Math.sin(frameCount * 0.1);
+    pxRect(cx, cy, CW, CH, '#f40'); ctx.globalAlpha = 1;
+    for (let i = 0; i < 5; i++) pxRect(cx + ((i * 23 + frameCount * 0.3) % CW), cy + CH - 4 - ((i * 17 + frameCount * 0.5) % (CH - 6)), 2, 2, '#fa0');
+  }
+  ctx.globalAlpha = 0.2;
+  for (let i = 1; i < GRID; i++) { pxRect(AX + i * CW, AY, 1, AH, '#446'); pxRect(AX, AY + i * CH, AW, 1, '#446'); }
+  ctx.globalAlpha = 1;
+  // shrinking walls
+  const b = bounds();
+  if (rule('shrinking_arena')) {
+    ctx.globalAlpha = 0.5;
+    pxRect(AX, AY, AW, b.y0 - AY, '#300'); pxRect(AX, b.y1, AW, AY + AH - b.y1, '#300');
+    pxRect(AX, b.y0, b.x0 - AX, b.y1 - b.y0, '#300'); pxRect(b.x1, b.y0, AX + AW - b.x1, b.y1 - b.y0, '#300');
+    ctx.globalAlpha = 1; pxBorder(b.x0, b.y0, b.x1 - b.x0, b.y1 - b.y0, '#f44');
+  }
+  pxBorder(AX, AY, AW, AH, '#fff');
+  if (gameState !== 'win') drawBoss();
+  for (const s of shots) pxRect(s.x - 1, s.y - 3, 2, 5, '#8ff');
+  for (const bl of bullets) { pxRect(bl.x - bl.r, bl.y - bl.r, bl.r * 2, bl.r * 2, bl.c); pxRect(bl.x - bl.r + 1, bl.y - bl.r + 1, bl.r * 2 - 2, bl.r * 2 - 2, '#fff'); }
+  if (gameState !== 'lose' && (iframes <= 0 || Math.floor(frameCount / 3) % 2 === 0)) {
+    const r = player.r, x = player.x, y = player.y;
+    ctx.fillStyle = '#0f8';
+    ctx.beginPath(); ctx.moveTo(x, y - r - 2); ctx.lineTo(x - r - 1, y + r + 1); ctx.lineTo(x + r + 1, y + r + 1); ctx.closePath(); ctx.fill();
+    pxRect(x - 1, y - 1, 2, 2, '#fff'); // true hitbox core
+    if (shield > 0) { ctx.strokeStyle = '#0f8'; ctx.globalAlpha = 0.6; ctx.beginPath(); ctx.arc(x, y, r + 5, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 1; }
+  }
+  for (const p of particles) { ctx.globalAlpha = Math.min(1, p.life / 20); pxRect(p.x, p.y, 1.5, 1.5, p.c); }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+
+  // ---- darkness overlay: you can see the boss, not its bullets ----
+  const dkR = rule('darkness');
+  if (dkR && gameState === 'play') {
+    dk.setTransform(1, 0, 0, 1, 0, 0); dk.clearRect(0, 0, IW, IH);
+    dk.globalCompositeOperation = 'source-over'; dk.fillStyle = 'rgba(0,0,0,0.97)'; dk.fillRect(AX + 1, AY + 1, AW - 2, AH - 2);
+    dk.globalCompositeOperation = 'destination-out';
+    const [hx, hy] = mapPt(player.x, player.y);
+    const grad = dk.createRadialGradient(hx, hy, dkR.radius * 0.5, hx, hy, dkR.radius);
+    grad.addColorStop(0, 'rgba(0,0,0,1)'); grad.addColorStop(1, 'rgba(0,0,0,0)');
+    dk.fillStyle = grad; dk.beginPath(); dk.arc(hx, hy, dkR.radius, 0, Math.PI * 2); dk.fill();
+    dk.globalCompositeOperation = 'source-over';
+    ctx.drawImage(dark, 0, 0);
+    ctx.save(); worldTransform(ctx); drawBoss(); ctx.restore();
+  }
+
+  // ---- rule indicators (screen space, readable) ----
+  const g = rule('gravity');
+  if (g && gameState === 'play') {
+    const off = (frameCount * 0.6) % 20;
+    for (let i = 0; i < 6; i++) {
+      let x, y; const along = i * (g.dir === 'left' || g.dir === 'right' ? AH : AW) / 6 + 10;
+      if (g.dir === 'down' || g.dir === 'up') { x = AX + along; y = AY + 20 + ((g.dir === 'down' ? off : -off) + 400) % (AH - 40); }
+      else { y = AY + along; x = AX + 20 + ((g.dir === 'right' ? off : -off) + 400) % (AW - 40); }
+      pxText({ down: 'v', up: '^', left: '<', right: '>' }[g.dir], x, y, 'rgba(255,170,0,0.35)', 8, 'center');
+    }
+  }
+  if (nf && gameState === 'play' && inNoFire(player.x, player.y)) { const [lx, ly] = mapPt(player.x, player.y); pxText('NO FIRE', lx, ly + player.r + 10, '#48f', 6, 'center'); }
+  const tp = rule('boss_teleport');
+  if (tp && gameState === 'play') {
+    const [bx, by] = mapPt(boss.x, boss.y); const f = boss.tpTimer / (tp.interval_s * 60);
+    ctx.strokeStyle = '#f8f'; ctx.beginPath(); ctx.arc(bx, by, 22, -Math.PI / 2, -Math.PI / 2 + f * Math.PI * 2); ctx.stroke();
+  }
+  if (rule('inverted_controls') && gameState === 'play') pxText('INVERTED', AX + AW / 2, AY + AH - 4, 'rgba(255,0,255,0.5)', 6, 'center');
+  if (rule('mirror_screen') && gameState === 'play') { ctx.globalAlpha = 0.5; pxBorder(AX - 2, AY - 2, AW + 4, AH + 4, '#c8f'); ctx.globalAlpha = 1; }
+  ctx.restore();
+
+  // ---- HUD ----
+  const hpW = 240, hpX = IW / 2 - hpW / 2;
+  pxText('THE GAME MASTER', IW / 2, 7, '#f0f', 6, 'center');
+  pxRect(hpX, 9, hpW, 5, '#222');
+  pxRect(hpX, 9, hpW * Math.max(0, boss.hp) / boss.maxHp, 5, '#f0f');
+  for (const t of THRESHOLDS) pxRect(hpX + hpW * t, 9, 1, 5, '#000');
+  pxBorder(hpX, 9, hpW, 5, '#fff');
+  if (gemini.tauntTimer > 0 && gemini.taunt) {
+    ctx.globalAlpha = Math.min(1, gemini.tauntTimer / 30);
+    const lines = wrap(`"${gemini.taunt}"`, 300, 6).slice(0, 2);
+    lines.forEach((l, i) => pxText(l, IW / 2, 24 + i * 8, '#fcf', 6, 'center'));
+    ctx.globalAlpha = 1;
+  }
+  // left: player
+  pxText('YOU', 6, AY + 8, '#0f8', 7);
+  for (let i = 0; i < Math.max(lives, 0); i++) pxRect(6 + i * 7, AY + 13, 5, 5, '#f44');
+  if (shield) pxText(`shield ${shield}`, 6, AY + 30, '#0f8', 6);
+  pxText(`Phase ${phase}`, 6, AY + 44, '#fff', 6);
+  const len = phase === 1 ? FIRST_PHASE_LEN : PHASE_LEN;
+  pxRect(6, AY + 48, 60, 3, '#222'); pxRect(6, AY + 48, 60 * Math.min(1, phaseTimer / len), 3, '#f0f');
+  pxText(`Pattern:`, 6, AY + 62, '#666', 6); pxText(PATTERNS[patternIdx], 6, AY + 70, '#aaa', 6);
+  const acc = tel && tel.shotsFired ? Math.round(tel.shotsHit / tel.shotsFired * 100) : 0;
+  pxText(`Accuracy ${acc}%`, 6, AY + 84, '#666', 6);
+  pxText(`GM: ${gemini.key ? 'Gemini' : 'offline'}`, 6, AY + AH - 4, gemini.key ? '#0ff' : '#555', 6);
+  // right: active rules
+  const rx = AX + AW + 6;
+  pxText('RULES', rx, AY + 8, '#f0f', 7);
+  if (!activeRules.length) pxText('none', rx, AY + 20, '#444', 6);
+  activeRules.forEach((r, i) => { pxRect(rx, AY + 14 + i * 14, 72, 11, '#1a1026'); pxRect(rx, AY + 14 + i * 14, 2, 11, RULES[r.id].color); pxText(RULES[r.id].name, rx + 5, AY + 22 + i * 14, RULES[r.id].color, 6); });
+  pxText('move: arrows/WASD   shoot: hold Space/Z', IW / 2, IH - 6, '#444', 6, 'center');
+
+  if (gameState === 'card') renderCard();
+  if (gameState === 'win' || gameState === 'lose') renderEnd();
+  blit();
+}
+
+function renderCard() {
+  ctx.globalAlpha = 0.75; pxRect(0, 0, IW, IH, '#000'); ctx.globalAlpha = 1;
+  const cw = 320, cx = IW / 2 - cw / 2, cy = 90;
+  if (!card.plan) {
+    pxRect(cx, cy + 40, cw, 60, '#1a0826'); pxBorder(cx, cy + 40, cw, 60, '#f0f');
+    pxText('PHASE COMPLETE', IW / 2, cy + 60, '#f0f', 8, 'center');
+    const dots = '.'.repeat(1 + Math.floor(frameCount / 15) % 3);
+    pxText(`The Game Master is rewriting the rules${dots}`, IW / 2, cy + 80, '#aaa', 6, 'center');
+    return;
+  }
+  const p = card.plan;
+  const lines = wrap(`"${p.announcement}"`, cw - 24, 7).slice(0, 4);
+  const ch = 50 + lines.length * 10 + p.rules.length * 16 + 16;
+  const flash = Math.floor(frameCount / 8) % 2 === 0;
+  pxRect(cx, cy, cw, ch, '#1a0826'); pxBorder(cx, cy, cw, ch, flash ? '#f0f' : '#808');
+  pxText(`NEW RULES — PHASE ${phase + 1}`, IW / 2, cy + 16, flash ? '#fff' : '#f0f', 10, 'center');
+  lines.forEach((l, i) => pxText(l, IW / 2, cy + 34 + i * 10, '#fcf', 7, 'center'));
+  let y = cy + 40 + lines.length * 10;
+  for (const r of p.rules) {
+    pxRect(cx + 16, y, cw - 32, 13, '#0e0616'); pxRect(cx + 16, y, 3, 13, RULES[r.id].color);
+    pxText(RULES[r.id].name, cx + 24, y + 9, RULES[r.id].color, 7);
+    pxText(RULES[r.id].desc(r.params), cx + cw - 20, y + 9, '#aaa', 6, 'right');
+    y += 16;
+  }
+  pxRect(cx + 16, y + 4, cw - 32, 3, '#222');
+  pxRect(cx + 16, y + 4, (cw - 32) * (1 - card.t / 150), 3, '#f0f');
+  pxText(p.source === 'gemini' ? 'chosen by Gemini' : 'offline heuristic', cx + cw - 8, cy + ch - 4, '#555', 5, 'right');
+}
+
+function renderTitle() {
+  for (let i = 0; i < 50; i++) pxRect((i * 73 + frameCount * 0.2) % IW, (i * 47 + i * i) % IH, 1, 1, i % 3 ? '#224' : '#448');
+  pxText('THE GAME MASTER', IW / 2, 90, '#f0f', 16, 'center');
+  const bx = boss.x, by = boss.y; boss.x = IW / 2; boss.y = 125; drawBoss(); boss.x = bx; boss.y = by;
+  pxText('Gemini is the boss. It watches how you play,', IW / 2, 165, '#aaa', 7, 'center');
+  pxText('then rewrites the rules of the fight to beat you.', IW / 2, 176, '#aaa', 7, 'center');
+  pxText('Move: arrows / WASD     Shoot: hold Space or Z', IW / 2, 200, '#666', 6, 'center');
+  pxText('Rules change every phase. Survive them. Break the boss.', IW / 2, 211, '#666', 6, 'center');
+  pxText(gemini.key ? 'Game Master: Gemini online' : 'Game Master: offline heuristics (add a key for Gemini)', IW / 2, 232, gemini.key ? '#0ff' : '#555', 6, 'center');
+  if (Math.floor(frameCount / 30) % 2 === 0) pxText('PRESS ENTER', IW / 2, 262, '#fff', 9, 'center');
+}
+
+function renderEnd() {
+  ctx.globalAlpha = 0.7; pxRect(0, 0, IW, IH, '#000'); ctx.globalAlpha = 1;
+  const won = gameState === 'win';
+  pxText(won ? 'YOU BROKE THE GAME MASTER' : 'THE GAME MASTER WINS', IW / 2, 140, won ? '#0f8' : '#f0f', 12, 'center');
+  pxText(`Phases: ${phase}   Hits taken: ${totalHits}   Boss HP left: ${Math.round(Math.max(0, boss.hp) / boss.maxHp * 100)}%`, IW / 2, 165, '#aaa', 7, 'center');
+  pxText('Post-match report in the panel →', IW / 2, 182, '#666', 6, 'center');
+  if (Math.floor(frameCount / 30) % 2 === 0) pxText('PRESS ENTER TO PLAY AGAIN', IW / 2, 210, '#fff', 8, 'center');
+}
+
+function blit() { dctx.clearRect(0, 0, display.width, display.height); dctx.drawImage(buffer, 0, 0, IW, IH, 0, 0, IW * scale, IH * scale); }
+function gameLoop() { update(); render(); requestAnimationFrame(gameLoop); }
+tel = newTel();
+boss.x = AX + AW / 2; boss.y = AY + 30;
+geminiLoad();
+gameLoop();
+</script>
+</body>
+</html>
