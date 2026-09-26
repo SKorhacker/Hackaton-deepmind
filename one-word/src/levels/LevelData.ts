@@ -27,10 +27,13 @@ export interface LevelData {
   playerStart: Pos;
   exit: Pos;
   entities: LevelEntity[];
-  /** All rules; exactly one has an editable word. */
+  /** All rules; at least one has an editable word. */
   rules: RuleDefinition[];
-  /** Replacement tokens known to solve the level (checked by tests/solutions.test.ts). */
-  solutions: string[];
+  /**
+   * Replacements known to solve the level (checked by tests/solutions.test.ts):
+   * a token per solution, or one token per editable word when there are several.
+   */
+  solutions: (string | string[])[];
   /** Example words shown when the player types something the world doesn't understand. */
   hintWords?: string[];
   tutorial?: boolean;
@@ -38,6 +41,8 @@ export interface LevelData {
   timed?: boolean;
   /** Short line shown when the level starts. */
   intro?: string;
+  /** How many words may differ from the original at once (default 1: the ONE WORD rule). */
+  maxChanges?: number;
 }
 
 // Map legend:

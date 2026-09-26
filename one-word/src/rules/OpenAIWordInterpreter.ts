@@ -5,7 +5,7 @@ import type { InterpretContext, WordInterpreter } from './WordInterpreter';
 // result is re-validated here. It never produces code; on any error it
 // returns null and the game carries on with the local dictionary.
 
-export class LLMWordInterpreter implements WordInterpreter {
+export class OpenAIWordInterpreter implements WordInterpreter {
   lastNote = '';
 
   constructor(private apiKey: string, private model = 'gpt-4.1-mini', private timeoutMs = 5000) {}

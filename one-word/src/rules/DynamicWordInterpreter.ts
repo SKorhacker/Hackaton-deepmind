@@ -1,3 +1,4 @@
+import type { AIProvider } from '../config/GameConfig';
 import { parseSpec, SPEC_JSON_SCHEMA, type MechanicSpec } from './MechanicSpec';
 import { registry as sharedRegistry, type MechanicRegistry } from './MechanicRegistry';
 import type { InterpretContext } from './WordInterpreter';
@@ -30,8 +31,7 @@ export class DynamicWordInterpreter {
   lastNote = '';
 
   constructor(
-    private apiKey: string,
-    private model = 'gpt-4.1-mini',
+    private provider: AIProvider,
     private timeoutMs = 8000,
     private registry: MechanicRegistry = sharedRegistry,
   ) {}
@@ -62,33 +62,16 @@ export class DynamicWordInterpreter {
   private async request(word: string, context?: InterpretContext): Promise<MechanicSpec | null> {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), this.timeoutMs);
+    const prompt = `Sentence: ${context?.sentence ?? '___'}\nOld word: ${context?.current ?? '?'}\nNew word: "${word}"`;
     try {
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        signal: ctrl.signal,
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.apiKey}` },
-        body: JSON.stringify({
-          model: this.model,
-          temperature: 0,
-          messages: [
-            { role: 'system', content: SYSTEM },
-            {
-              role: 'user',
-              content: `Sentence: ${context?.sentence ?? '___'}\nOld word: ${context?.current ?? '?'}\nNew word: "${word}"`,
-            },
-          ],
-          response_format: {
-            type: 'json_schema',
-            json_schema: { name: 'mechanic', strict: true, schema: SPEC_JSON_SCHEMA },
-          },
-        }),
-      });
+      const res = this.provider.name === 'Gemini'
+        ? await this.askGemini(prompt, ctrl.signal)
+        : await this.askOpenAI(prompt, ctrl.signal);
       if (!res.ok) {
         console.warn('dynamic interpreter HTTP', res.status, await res.text().catch(() => ''));
         return null;
       }
-      const data = await res.json();
-      const raw = JSON.parse(data.choices?.[0]?.message?.content ?? '{}');
+      const raw = JSON.parse(await this.textOf(res));
       // The word the player typed names the mechanic, whatever the model calls it.
       const token = /^[a-zA-Z]{2,16}$/.test(word) ? word.toUpperCase() : String(raw.token ?? '');
       // A word must not quietly redefine a mechanic the game already ships with.
@@ -101,5 +84,45 @@ export class DynamicWordInterpreter {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  private askOpenAI(prompt: string, signal: AbortSignal) {
+    return fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      signal,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${this.provider.key}` },
+      body: JSON.stringify({
+        model: this.provider.model,
+        temperature: 0,
+        messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: prompt }],
+        response_format: {
+          type: 'json_schema',
+          json_schema: { name: 'mechanic', strict: true, schema: SPEC_JSON_SCHEMA },
+        },
+      }),
+    });
+  }
+
+  // Gemini's schema dialect differs, so the shape travels in the prompt instead;
+  // `parseSpec` is the real gatekeeper either way.
+  private askGemini(prompt: string, signal: AbortSignal) {
+    return fetch(`https://generativelanguage.googleapis.com/v1beta/models/${this.provider.model}:generateContent`, {
+      method: 'POST',
+      signal,
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': this.provider.key },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: `${SYSTEM}\n\nAnswer with JSON of this shape:\n${JSON.stringify(SPEC_JSON_SCHEMA)}` }] },
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0, responseMimeType: 'application/json' },
+      }),
+    });
+  }
+
+  private async textOf(res: Response): Promise<string> {
+    const data = await res.json();
+    if (this.provider.name === 'Gemini') {
+      return data.candidates?.[0]?.content?.parts?.map((p: { text?: string }) => p.text ?? '').join('') || '{}';
+    }
+    return data.choices?.[0]?.message?.content ?? '{}';
   }
 }

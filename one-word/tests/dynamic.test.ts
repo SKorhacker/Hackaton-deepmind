@@ -7,14 +7,14 @@
 //
 //   npm test
 
-import { LEVELS } from '../src/levels/levels';
+import { loadLevels } from './loadLevels';
 import { withReplacement } from '../src/rules/RuleParser';
 import { parseSpec, type MechanicSpec } from '../src/rules/MechanicSpec';
 import { MechanicRegistry } from '../src/rules/MechanicRegistry';
 import { BUILTIN_SPECS, mechanicsWithoutSpec } from '../src/rules/builtinSpecs';
 import { World } from '../src/systems/World';
 import { DIRS } from '../src/systems/Pathfinding';
-import { solveFixed } from './solutions.test';
+import { solve } from '../src/systems/Solver';
 
 let failed = false;
 function check(name: string, ok: boolean, detail = '') {
@@ -42,21 +42,22 @@ check('action lists are capped', overreach?.tile?.onEnter.length === 3);
 
 // ---------------------------------------------------------------- simulation
 
+const LEVELS = await loadLevels();
 const RED = LEVELS[0];       // YOU DIE ON RED — a lava band between you and the exit
 const GUARD = LEVELS[1];     // GUARD CHASES YOU
 
-/** A world running the level with its editable word replaced by an invented one. */
+/** A world running the level with its verb replaced by an invented one. */
 function worldWith(level: typeof RED, spec: MechanicSpec, ruleIndex = 0) {
   const reg = new MechanicRegistry([...BUILTIN_SPECS, spec]);
-  const rules = level.rules.map((r, i) => (i === ruleIndex ? withReplacement(r, spec.token) : r));
+  const rules = level.rules.map((r, i) => (i === ruleIndex ? withReplacement(r, spec.token, 'verb') : r));
   return new World(level, rules, undefined, reg);
 }
 
 const MELT = parseSpec('MELT', { tile: { onEnter: [{ do: 'die' }], status: [] } })!;
-check('an invented deadly word is as fatal as DIE', solveFixed(worldWith(RED, MELT)) === null);
+check('an invented deadly word is as fatal as DIE', solve(worldWith(RED, MELT)) === null);
 
 const WARP = parseSpec('WARP', { tile: { onEnter: [{ do: 'teleport', target: 'EXIT' }], status: [] } })!;
-check('an invented teleport wins a level DIE cannot', solveFixed(worldWith(RED, WARP)) !== null);
+check('an invented teleport wins a level DIE cannot', solve(worldWith(RED, WARP)) !== null);
 
 // GHOST: the red band stops killing and starts letting you through walls.
 const GHOST = parseSpec('GHOST', { tile: { onEnter: [], status: ['phasing'] } })!;
@@ -74,7 +75,7 @@ const g0 = { ...shadow.s.guards[0] };
 shadow.step(DIRS[1]);
 const moved = Math.abs(shadow.s.guards[0].x - g0.x) + Math.abs(shadow.s.guards[0].y - g0.y);
 check('a two-step word really moves twice', moved === 2, `moved ${moved}`);
-check('a harmless invented guard lets you out', solveFixed(shadow.clone()) !== null);
+check('a harmless invented guard lets you out', solve(shadow.clone()) !== null);
 
 // A word invented in one world must not leak into another.
 check('inventing a word leaves the shipped ones alone',

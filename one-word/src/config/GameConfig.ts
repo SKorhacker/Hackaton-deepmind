@@ -25,17 +25,26 @@ export const COLORS = {
   ice: 0x9fdcff,
 };
 
-/** OpenAI config. The key is read ONLY in dev (from .env.local), so it is never baked
- *  into a production build. In production a key can be pasted at runtime (kept in localStorage). */
-export function openAIKey(): string {
-  const devKey = import.meta.env.DEV ? (import.meta.env.VITE_OPENAI_API_KEY as string | undefined) : undefined;
+// ---------- AI word interpreter ----------
+// Keys are read from .env.local ONLY in dev, so they are never baked into a
+// production build. In production a key can be pasted on the title screen
+// (kept in this browser's localStorage). Gemini is used when a Gemini key is
+// set, otherwise OpenAI.
+
+// Each env read sits behind its own `import.meta.env.DEV ?` so the production
+// build drops the key entirely (tools/check-no-keys.mjs verifies dist/).
+function readKey(devKey: string | undefined, storageKey: string): string {
   let stored = '';
-  try { stored = localStorage.getItem('oneword_openai_key') ?? ''; } catch { /* storage blocked */ }
+  try { stored = localStorage.getItem(storageKey) ?? ''; } catch { /* storage blocked */ }
   return stored || devKey || '';
 }
-export function setOpenAIKey(key: string) {
-  try { localStorage.setItem('oneword_openai_key', key); } catch { /* storage blocked */ }
+export function geminiKey(): string {
+  return readKey(import.meta.env.DEV ? (import.meta.env.VITE_GEMINI_API_KEY as string | undefined) : undefined, 'oneword_gemini_key');
 }
+export function openAIKey(): string {
+  return readKey(import.meta.env.DEV ? (import.meta.env.VITE_OPENAI_API_KEY as string | undefined) : undefined, 'oneword_openai_key');
+}
+export const GEMINI_MODEL = (import.meta.env.VITE_GEMINI_MODEL as string | undefined) || 'gemini-3.8-flash';
 export const OPENAI_MODEL = (import.meta.env.VITE_OPENAI_MODEL as string | undefined) || 'gpt-4.1-mini';
 
 /** Dynamic mode: verb slots accept any word the model can turn into a mechanic. */
@@ -44,4 +53,20 @@ export function dynamicMode(): boolean {
 }
 export function setDynamicMode(on: boolean) {
   try { localStorage.setItem('oneword_dynamic', on ? '1' : '0'); } catch { /* storage blocked */ }
+}
+
+export type AIProvider = { name: 'Gemini' | 'OpenAI'; key: string; model: string };
+export function aiProvider(): AIProvider | null {
+  const g = geminiKey();
+  if (g) return { name: 'Gemini', key: g, model: GEMINI_MODEL };
+  const o = openAIKey();
+  if (o) return { name: 'OpenAI', key: o, model: OPENAI_MODEL };
+  return null;
+}
+/** Store a pasted key under the right provider (OpenAI keys start with "sk-"). Empty clears both. */
+export function setAIKey(key: string) {
+  try {
+    if (!key) { localStorage.removeItem('oneword_gemini_key'); localStorage.removeItem('oneword_openai_key'); return; }
+    localStorage.setItem(key.startsWith('sk-') ? 'oneword_openai_key' : 'oneword_gemini_key', key);
+  } catch { /* storage blocked */ }
 }

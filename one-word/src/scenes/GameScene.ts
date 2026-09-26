@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { COLORS, DEBUG_MODE, OPENAI_MODEL, TILE, dynamicMode, openAIKey } from '../config/GameConfig';
+import { COLORS, DEBUG_MODE, TILE, aiProvider, dynamicMode } from '../config/GameConfig';
 import { LEVELS } from '../levels/levels';
 import { T, type LevelData, type Pos } from '../levels/LevelData';
 import type { Mechanic } from '../rules/RuleDefinition';
@@ -8,8 +8,9 @@ import type { MechanicSpec, MotionMode } from '../rules/MechanicSpec';
 import { ruleTokens } from '../rules/RuleParser';
 import { RuleManager } from '../rules/RuleManager';
 import { normalizeWord } from '../rules/WordInterpreter';
-import { LLMWordInterpreter } from '../rules/LLMWordInterpreter';
+import { createInterpreter } from '../rules/createInterpreter';
 import { DynamicWordInterpreter } from '../rules/DynamicWordInterpreter';
+import { comboKey } from '../systems/Solver';
 import { World, type WorldEvent } from '../systems/World';
 import { RuleEditor } from '../ui/RuleEditor';
 import { LevelCompleteUI } from '../ui/LevelCompleteUI';
@@ -119,11 +120,12 @@ export class GameScene extends Phaser.Scene {
     complete.hide();
     editor.close();
 
-    const key = openAIKey();
+    const ai = aiProvider();
     this.rules = new RuleManager(
       this.level.rules,
-      key ? new LLMWordInterpreter(key, OPENAI_MODEL) : null,
-      key && dynamicMode() ? new DynamicWordInterpreter(key, OPENAI_MODEL) : null,
+      createInterpreter(),
+      this.level.maxChanges ?? 1,
+      ai && dynamicMode() ? new DynamicWordInterpreter(ai) : null,
     );
     this.world = new World(this.level, this.rules.rules);
 
@@ -145,7 +147,7 @@ export class GameScene extends Phaser.Scene {
       if (this.level.tutorial && !session.tutorialDone) editor.setTutorial('type');
     };
     editor.render(this.rules.rules, this.rules.slots);
-    wordbook.onPick = (w) => editor.open(this.lastSlot >= 0 ? this.lastSlot : this.rules.slots[0], w);
+    wordbook.onPick = (w) => editor.open(Math.max(0, this.lastSlot), w);
     wordbook.render();
     editor.setTutorial(this.level.tutorial && !session.tutorialDone ? 'click' : null);
     document.getElementById('level-name')!.textContent = `LEVEL ${this.level.id} · ${this.level.name}`;
@@ -374,7 +376,7 @@ export class GameScene extends Phaser.Scene {
     if (e.key === '`') { this.debug = !this.debug; this.drawDebug(); return; }
     if (e.key === 'r' || e.key === 'R') { e.preventDefault(); this.restart(); return; }
     if (e.key === 'Escape') { this.toMenu(); return; }
-    if (e.key === 'Enter' || e.key === 'e' || e.key === 'E') { e.preventDefault(); editor.open(this.lastSlot >= 0 ? this.lastSlot : this.rules.slots[0]); return; }
+    if (e.key === 'Enter' || e.key === 'e' || e.key === 'E') { e.preventDefault(); editor.open(Math.max(0, this.lastSlot)); return; }
     const dir = KEYMAP[e.key];
     if (dir || e.key === ' ') {
       e.preventDefault();
@@ -550,13 +552,11 @@ export class GameScene extends Phaser.Scene {
     if (res.token === this.rules.tokenAt(slot)) {
       return { ok: false as const, message: "THAT'S ALREADY THE RULE." };
     }
-    // ONE WORD: rewriting this slot restores any other rewritten slot.
-    const before = this.rules.changedSlot;
+    // ONE WORD: rewriting this slot restores the oldest rewritten one if over the level's limit.
     this.activeWord = { word: normalizeWord(raw) ?? raw.trim(), token: res.token, ai: res.source === 'ai' };
     this.lastSlot = slot;
-    this.rules.apply(slot, res.token);
-    const affected = before >= 0 && before !== slot ? [slot, before] : [slot];
-    void editor.playRewrite(this.rules.rules, this.rules.slots, this.rules.changedSlot, affected);
+    const restored = this.rules.apply(slot, res.token);
+    void editor.playRewrite(this.rules.rules, this.rules.slots, this.rules.changedSlots, [slot, ...restored]);
     const ev = this.world.setRules(this.rules.rules);
     this.playRewriteFx();
     this.effects(ev);
@@ -598,19 +598,22 @@ export class GameScene extends Phaser.Scene {
   // ---------------- level complete ----------------
 
   private showComplete() {
-    const token = this.rules.solutionToken();
+    const token = this.rules.solutionKey();
     const found = foundFor(this.level.id);
     const isNew = !found.has(token);
     found.add(token);
     const w = this.activeWord;
-    const unlocked = w && w.token === token && wordbook.add(w.word, w.token, w.ai, this.level.id) ? w.word.toUpperCase() : null;
+    const stillWritten = w && this.lastSlot >= 0 && this.rules.changedSlots.includes(this.lastSlot) && this.rules.tokenAt(this.lastSlot) === w.token;
+    const unlocked = w && stillWritten && wordbook.add(w.word, w.token, w.ai, this.level.id) ? w.word.toUpperCase() : null;
     const time = this.time.now - this.startTime;
     const prev = session.best.get(this.level.id);
     if (!prev || time < prev.time) session.best.set(this.level.id, { time, words: this.wordsTried, deaths: this.deaths, solution: token });
 
     const ruleHtml = this.rules.rules.map((r) => ruleTokens(r).map((t) => (t.editable ? `<span class="hl">${t.text}</span>` : t.text)).join(' ')).join('<br>');
-    const expected = this.level.solutions.includes(token);
-    const unfound = this.level.solutions.filter((s) => !found.has(s));
+    const solutions = this.level.solutions.map(comboKey);
+    // Timed levels are judged by the solver (no fixed answer list): any win counts.
+    const expected = !!this.level.timed || solutions.includes(token);
+    const unfound = solutions.filter((s) => !found.has(s));
     const last = this.levelIndex === LEVELS.length - 1;
     complete.show({
       title: expected ? 'LEVEL COMPLETE' : 'LEVEL COMPLETE?!',
@@ -623,7 +626,7 @@ export class GameScene extends Phaser.Scene {
         ['Solution', expected ? token : `${token} (unexpected!)`],
         ...(unlocked ? [['Word unlocked', `${unlocked}${w!.ai ? ' ✦' : ''}`] as [string, string]] : []),
       ],
-      solutions: this.level.solutions.length > 1 ? { list: this.level.solutions, found } : null,
+      solutions: solutions.length > 1 ? { list: solutions, found } : null,
       nextLabel: last ? 'FINISH →' : 'NEXT LEVEL →',
       replayLabel: unfound.length ? 'TRY ANOTHER WORD' : undefined,
     }, () => {
@@ -643,7 +646,7 @@ export class GameScene extends Phaser.Scene {
     const rows: [string, string][] = LEVELS.map((l) => {
       const f = foundFor(l.id);
       total += l.solutions.length;
-      got += l.solutions.filter((s) => f.has(s)).length;
+      got += l.solutions.filter((s) => f.has(comboKey(s))).length;
       const b = session.best.get(l.id);
       return [`${l.id} ${l.name}`, b ? `${b.solution} · ${fmtTime(b.time)}` : '—'];
     });

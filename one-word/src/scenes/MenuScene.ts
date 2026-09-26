@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { COLORS, OPENAI_MODEL, dynamicMode, openAIKey, setDynamicMode, setOpenAIKey } from '../config/GameConfig';
+import { COLORS, aiProvider, dynamicMode, setAIKey, setDynamicMode } from '../config/GameConfig';
 import { LEVELS } from '../levels/levels';
 import { session } from '../config/Session';
 
@@ -24,8 +24,9 @@ export class MenuScene extends Phaser.Scene {
     });
     this.add.text(W / 2, H * 0.28 + 72, 'Change one word.\nChange the world.', { fontFamily: FONT, fontSize: '20px', color: '#8a85a0', align: 'center', lineSpacing: 6 }).setOrigin(0.5);
 
-    this.button(W / 2, H * 0.62, 'PLAY', true, () => this.start(0));
-    this.button(W / 2, H * 0.62 + 62, 'HOW TO PLAY', false, () => this.howTo());
+    this.button(W / 2, H * 0.52, 'PLAY', true, () => this.start(0));
+    this.button(W / 2, H * 0.52 + 56, 'HOW TO PLAY', false, () => this.howTo());
+    this.button(W / 2, H * 0.52 + 112, 'MAKE A LEVEL', false, () => { window.location.href = './editor.html'; });
 
     // Level select (handy for demos).
     const lx = W / 2 - ((LEVELS.length - 1) * 44) / 2;
@@ -42,23 +43,23 @@ export class MenuScene extends Phaser.Scene {
     this.add.text(W / 2, H - 94, 'LEVELS', { fontFamily: FONT, fontSize: '11px', color: '#5d5873' }).setOrigin(0.5);
 
     const ai = this.add.text(W - 14, H - 12, '', { fontFamily: FONT, fontSize: '11px', color: '#5d5873' }).setOrigin(1, 1).setInteractive({ useHandCursor: true });
-    const refreshAi = () => ai.setText(openAIKey() ? `AI interpreter: ON (${OPENAI_MODEL})` : 'AI interpreter: OFF · click to add an OpenAI key');
+    const refreshAi = () => { const p = aiProvider(); ai.setText(p ? `AI interpreter: ON (${p.model})` : 'AI interpreter: OFF · click to add a Gemini or OpenAI key'); };
     refreshAi();
     ai.on('pointerdown', () => {
-      const k = window.prompt('OpenAI API key (stored only in this browser). Leave empty to turn AI off.', '');
-      if (k !== null) { setOpenAIKey(k.trim()); refreshAi(); refreshDyn(); }
+      const k = window.prompt('Gemini (Google AI Studio) or OpenAI API key, stored only in this browser. Leave empty to turn AI off.', '');
+      if (k !== null) { setAIKey(k.trim()); refreshAi(); refreshDyn(); }
     });
 
     // Dynamic mode: verbs stop being a menu — the model invents the mechanic itself.
     const dyn = this.add.text(14, H - 12, '', { fontFamily: FONT, fontSize: '11px', color: '#5d5873' }).setOrigin(0, 1).setInteractive({ useHandCursor: true });
     const refreshDyn = () => dyn.setText(
-      !openAIKey() ? 'Dynamic words: needs an AI key'
+      !aiProvider() ? 'Dynamic words: needs an AI key'
       : dynamicMode() ? 'Dynamic words: ON · any verb becomes a real rule'
       : 'Dynamic words: OFF · click for invented mechanics',
     );
     refreshDyn();
     dyn.on('pointerdown', () => {
-      if (!openAIKey()) return;
+      if (!aiProvider()) return;
       setDynamicMode(!dynamicMode());
       refreshDyn();
     });
