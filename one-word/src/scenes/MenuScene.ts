@@ -38,7 +38,12 @@ export class MenuScene extends Phaser.Scene {
     const modeH = Math.max(36, 34 * s);
     const capH = Math.max(26, 30 * s);
     const btnGap = Math.max(8, 14 * s);
-    const levelY = H - Math.max(40, 64 * s);
+    // The level row wraps rather than shrinking below a finger-sized spacing.
+    const gap = Math.max(MIN_TAP, 44 * s);
+    const perRow = Math.max(1, Math.min(LEVELS.length, Math.floor((W - 24) / gap)));
+    const rows = Math.ceil(LEVELS.length / perRow);
+    const rowH = Math.max(MIN_TAP, 40 * s);
+    const levelY = H - Math.max(40, 64 * s) - (rows - 1) * rowH;
     const labelY = levelY - Math.max(26, 30 * s);
     const blockH = modeH + capH + btnGap + btnH * 3 + btnGap * 2;
     const stackTop = Math.min(H * 0.34, labelY - Math.max(10, 16 * s) - blockH);
@@ -84,12 +89,13 @@ export class MenuScene extends Phaser.Scene {
     this.button(W / 2, btnY + step * 2, btnW, btnH, 'MAKE A LEVEL', false, fs(16, 13), () => { window.location.href = './editor.html'; });
 
     // Level select (handy for demos).
-    const gap = Math.min(Math.max(MIN_TAP, 44 * s), (W - 24) / LEVELS.length);
-    const lx = W / 2 - ((LEVELS.length - 1) * gap) / 2;
-    const ly = levelY;
     LEVELS.forEach((l, i) => {
+      const row = Math.floor(i / perRow);
+      const col = i % perRow;
+      const inRow = Math.min(perRow, LEVELS.length - row * perRow);
+      const x = W / 2 - ((inRow - 1) * gap) / 2 + col * gap;
       const solved = session.best.has(l.id);
-      const t = this.add.text(lx + i * gap, ly, String(l.id), {
+      const t = this.add.text(x, levelY + row * rowH, String(l.id), {
         fontFamily: FONT, fontSize: fs(16, 15), color: solved ? '#5ee6a0' : '#5d5873',
         backgroundColor: '#1d1a29', padding: { x: 10, y: 6 },
       }).setOrigin(0.5);
