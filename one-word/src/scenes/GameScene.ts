@@ -10,6 +10,7 @@ import { World, type WorldEvent } from '../systems/World';
 import { RuleEditor } from '../ui/RuleEditor';
 import { LevelCompleteUI } from '../ui/LevelCompleteUI';
 import { sfx } from '../ui/Sfx';
+import { audio } from '../ui/Audio';
 import { fmtTime, foundFor, session } from '../config/Session';
 
 const FONT = '"Space Mono", monospace';
@@ -116,6 +117,7 @@ export class GameScene extends Phaser.Scene {
     this.events.once('shutdown', () => window.removeEventListener('keydown', this.onKey));
 
     this.startTime = this.time.now;
+    this.updateMusic(0.8);
     this.updateStats();
     this.sync(false);
     this.cameras.main.fadeIn(250, 20, 18, 28);
@@ -356,7 +358,7 @@ export class GameScene extends Phaser.Scene {
         case 'freeze': sfx.freeze(); this.burst(this.world.s.player.x, this.world.s.player.y, COLORS.ice, 10); break;
         case 'key': sfx.key(); this.burst(e.x, e.y, COLORS.key, 16); this.floatText(e, 'UNLOCKED!', '#ffd166'); break;
         case 'door': sfx.door(); this.burst(e.x, e.y, COLORS.door, e.open ? 10 : 4); break;
-        case 'wait': break;
+        case 'wait': sfx.wait(); break;
       }
     }
   }
@@ -430,6 +432,13 @@ export class GameScene extends Phaser.Scene {
     this.resetWorld(true);
   }
 
+  /** The bed follows the rule, not the level: defuse the guard and the music calms down. */
+  private updateMusic(fade = 1.6) {
+    const hunted = this.rules.rules.some((r) => r.subject === 'GUARD' && r.object === 'YOU' && (r.verb === 'CHASE' || r.verb === 'ATTACK'));
+    const hasLock = this.level.entities.some((e) => e.type === 'key' || e.type === 'door');
+    audio.playMusic(hunted ? 'tension' : hasLock ? 'mystery' : 'calm', fade);
+  }
+
   private toMenu() {
     complete.hide();
     editor.close();
@@ -495,6 +504,7 @@ export class GameScene extends Phaser.Scene {
       this.burst(g.x, g.y, guardStyle(this.world.guardIntent(g).verb).color, 14);
     }
     this.sync(true);
+    this.updateMusic();
     // Show off the new plan for a moment.
     this.tweens.add({ targets: this.overlay, alpha: { from: 0, to: 1 }, duration: 500 });
   }
@@ -502,6 +512,7 @@ export class GameScene extends Phaser.Scene {
   // ---------------- level complete ----------------
 
   private showComplete() {
+    audio.playMusic('hope', 2.0);
     const token = this.rules.currentToken;
     const found = foundFor(this.level.id);
     const isNew = !found.has(token);

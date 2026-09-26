@@ -2,6 +2,8 @@ import Phaser from 'phaser';
 import { COLORS, OPENAI_MODEL, openAIKey, setOpenAIKey } from '../config/GameConfig';
 import { LEVELS } from '../levels/levels';
 import { session } from '../config/Session';
+import { audio } from '../ui/Audio';
+import { sfx } from '../ui/Sfx';
 
 const FONT = '"Space Mono", monospace';
 
@@ -10,6 +12,7 @@ export class MenuScene extends Phaser.Scene {
 
   create() {
     document.body.classList.add('in-menu');
+    audio.playMusic('menu', 1.6);
     const { width: W, height: H } = this.scale;
     this.drawBackdrop(W, H);
 
@@ -54,6 +57,7 @@ export class MenuScene extends Phaser.Scene {
   }
 
   private start(levelIndex: number) {
+    sfx.click();
     this.scene.start('game', { levelIndex });
   }
 
@@ -77,6 +81,7 @@ export class MenuScene extends Phaser.Scene {
   }
 
   private howTo() {
+    sfx.click();
     const { width: W, height: H } = this.scale;
     const layer = this.add.container(0, 0).setDepth(10);
     const shade = this.add.rectangle(W / 2, H / 2, W, H, 0x0a0810, 0.85).setInteractive();

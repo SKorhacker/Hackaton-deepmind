@@ -239,7 +239,25 @@ button.ghost:hover { border-color: var(--dim); }
   100% { opacity: 0; transform: translate(-50%, -70%); }
 }
 
+/* ---------- sound toggle ---------- */
+#btn-sound {
+  position: fixed;
+  right: 10px; top: 10px;
+  z-index: 40;
+  width: 38px; height: 38px;
+  padding: 0;
+  font-size: 17px;
+  line-height: 1;
+  background: var(--panel);
+  color: var(--accent);
+  border: 1px solid var(--line);
+  opacity: 0.75;
+}
+#btn-sound:hover { opacity: 1; }
+#btn-sound.off { color: var(--dim); }
+
 @media (max-width: 640px) {
   .keys { display: none; }
   #statusbar { gap: 10px; }
+  #btn-sound { width: 44px; height: 44px; font-size: 19px; }
 }

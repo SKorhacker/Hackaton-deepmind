@@ -45,10 +45,23 @@ The game is fully playable without AI.
 
 `npm test` checks this table against every allowed word by exhaustive search.
 
+## Sound
+
+Music is generated with Lyria 3 (Gemini API) and the one-shot SFX are synthesised offline; both live in
+`public/audio/` (~2 MB total) and are reproducible with the scripts in `tools/audio/`.
+
+The score follows the rule sentence rather than the level: while a guard still `CHASE`s `YOU` the tense bed
+plays, and the moment you rewrite the word it crossfades to the calm or mysterious one. A win or a death
+fires a short sting that ducks the bed under it.
+
+Audio starts on the first tap or keypress (mobile autoplay rules) and the `♪` button, top right, mutes it;
+the choice is remembered in localStorage.
+
 ## Structure
 
 - `src/systems/World.ts`: deterministic turn-based simulation (no Phaser), rules → behavior
 - `src/rules/`: rule types, sentence rendering, interpreters, `RuleManager`
 - `src/levels/levels.ts`: ASCII level maps
 - `src/scenes/`: Phaser menu + game rendering
-- `src/ui/`: DOM rule editor, level-complete card, sound
+- `src/ui/`: DOM rule editor, level-complete card, `Audio.ts` (music beds, stings, samples) and `Sfx.ts`
+- `tools/audio/`: the generation scripts for everything in `public/audio/`

@@ -3,11 +3,14 @@ import './styles/main.css';
 import { COLORS } from './config/GameConfig';
 import { MenuScene } from './scenes/MenuScene';
 import { GameScene } from './scenes/GameScene';
+import { initAudio } from './ui/Audio';
 
 export const GAME_W = 960;
 export const GAME_H = 540;
 
 async function boot() {
+  initAudio();
+
   // Make sure Phaser text uses the web font from the first frame.
   try { await Promise.race([document.fonts.load('700 20px "Space Mono"'), new Promise((r) => setTimeout(r, 1500))]); } catch { /* offline */ }
 
