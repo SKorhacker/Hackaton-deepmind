@@ -1,21 +1,27 @@
 import Phaser from 'phaser';
+import { progress } from './Progress';
 
 export const OUTFITS = [
-  { id: 'wanderer', name: 'Wanderer', detail: 'A brave heart. A crimson cape.', color: 0xa44a31 },
-  { id: 'cartographer', name: 'Cartographer', detail: 'For those who take the unknown path.', color: 0x477766 },
-  { id: 'archivist', name: 'Archivist', detail: 'Every forgotten word has a keeper.', color: 0x334565 },
+  { id: 'wanderer', name: 'Wanderer', detail: 'A brave heart. A crimson cape.', unlockAfter: 0, color: 0xa44a31 },
+  { id: 'cartographer', name: 'Cartographer', detail: 'For those who take the unknown path.', unlockAfter: 2, color: 0x477766 },
+  { id: 'archivist', name: 'Archivist', detail: 'Every forgotten word has a keeper.', unlockAfter: 4, color: 0x334565 },
 ] as const;
+export const outfitUnlocked = (id: string) => {
+  const outfit = OUTFITS.find(o => o.id === id);
+  return !!outfit && (outfit.unlockAfter === 0 || progress.has(outfit.unlockAfter));
+};
 export type Outfit = typeof OUTFITS[number]['id'];
 export type Facing = 'down' | 'left' | 'up' | 'right';
 export const FACINGS: Facing[] = ['down', 'left', 'up', 'right'];
 let selected: Outfit = 'wanderer';
 try {
   const saved = localStorage.getItem('oneword_outfit');
-  if (OUTFITS.some(outfit => outfit.id === saved)) selected = saved as Outfit;
+  if (saved && outfitUnlocked(saved)) selected = saved as Outfit;
 } catch { /* Browser storage is optional. */ }
 export const character = {
   get outfit() { return selected; },
   select(outfit: Outfit) {
+    if (!outfitUnlocked(outfit)) return;
     selected = outfit;
     try { localStorage.setItem('oneword_outfit', outfit); } catch { /* Session selection still works. */ }
   },

@@ -239,9 +239,27 @@ button.ghost:hover { border-color: var(--dim); }
   100% { opacity: 0; transform: translate(-50%, -70%); }
 }
 
+/* ---------- sound toggle ---------- */
+#btn-sound {
+  position: fixed;
+  right: 10px; top: 10px;
+  z-index: 40;
+  width: 38px; height: 38px;
+  padding: 0;
+  font-size: 17px;
+  line-height: 1;
+  background: var(--panel);
+  color: var(--accent);
+  border: 1px solid var(--line);
+  opacity: 0.75;
+}
+#btn-sound:hover { opacity: 1; }
+#btn-sound.off { color: var(--dim); }
+
 @media (max-width: 640px) {
   .keys { display: none; }
   #statusbar { gap: 10px; }
+  #btn-sound { width: 44px; height: 44px; font-size: 19px; }
 }
 
 /* The Living Manuscript */
@@ -388,3 +406,60 @@ body:not(.in-menu) #game { background-image: none !important; }
 @media (max-width: 720px) { #statusbar { display: grid; grid-template-columns: repeat(3, auto) 1fr repeat(4, auto); } #level-name { grid-column: 1 / -1; } #statusbar .spacer { display: none; } #btn-pad { grid-column: 5; } #btn-restart { font-size: 0; } #btn-restart::after { content: "↻"; font-size: 20px; } #rulebar { overflow: visible; max-height: none; } }
 
 body.in-menu #game { touch-action: pan-y; }
+
+/* Integrated manuscript, word collection and landscape-only mobile play. */
+#play-area { display: flex; flex: 1; min-height: 0; min-width: 0; }
+#game { min-width: 0; }
+#wordbook { flex: 0 0 190px; min-width: 0; padding: 20px 12px; overflow-y: auto; border-left: 1px solid #d6b57555; background: linear-gradient(145deg, #1b3038, #10212a); }
+body.in-menu #wordbook { display: none; }
+#wordbook h2 { font-size: 11px; letter-spacing: 2px; color: var(--accent); margin-bottom: 6px; }
+#wb-count { float: right; }
+#wb-chapter { font-size: 11px; color: var(--dim); margin-bottom: 16px; }
+#wb-list { display: flex; flex-direction: column; gap: 8px; }
+.wb-word { width: 100%; display: flex; flex-direction: column; gap: 5px; text-align: left; color: var(--text); background: #d6b5750d; border: 1px solid #d6b57555; padding: 10px; min-height: 44px; overflow-wrap: anywhere; }
+.wb-word strong { color: var(--accent); font-size: 12px; }
+.wb-word small { font-size: 10px; line-height: 1.4; font-weight: 400; letter-spacing: 0; }
+.wb-word .wb-origin { color: var(--dim); font-size: 9px; }
+.wb-empty { color: var(--dim); font: italic 18px/1.5 'Cormorant Garamond', Georgia, serif; }
+.rule.multi { font-size: clamp(16px, 2.5vw, 24px); }
+.word.changed { background: #d6b57533; box-shadow: inset 0 -2px #d6b575; }
+#chapter-note { color: var(--dim); font-size: 11px; text-align: center; }
+#chapter-note:empty { display: none; }
+.mobile-outfits button:disabled { opacity: .5; cursor: default; }
+.mobile-outfits small { display: block; margin-top: 6px; font-size: 10px; line-height: 1.4; white-space: normal; }
+#rotate-screen { position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; gap: 20px; justify-content: center; align-items: center; text-align: center; padding: 32px; color: #f0e6cd; background: radial-gradient(ellipse at 50% 30%, #30454c, #0c1c26 75%); }
+#rotate-screen h1 { font: 500 clamp(32px, 9vw, 48px)/1.1 'Cormorant Garamond', Georgia, serif; }
+#rotate-screen p { max-width: 290px; font-size: 14px; line-height: 1.7; }
+#rotate-screen .rotate-note { color: #aebbb6; font-size: 12px; }
+.rotate-phone { width: 105px; height: 65px; border: 2px solid #d6b575; border-radius: 9px; font-size: 42px; color: #d6b575; line-height: 56px; box-shadow: 0 0 45px #d6b57515; }
+.portrait-blocked #app, .portrait-blocked #editor, .portrait-blocked #complete, .portrait-blocked #toast, .portrait-blocked #btn-sound { visibility: hidden; pointer-events: none; }
+@media (pointer: coarse) and (orientation: landscape) {
+  #wordbook { flex-basis: 145px; padding: 12px 8px; }
+  #rulebar { padding: 4px 48px; gap: 2px; }
+  .rule, .rule.multi { font-size: 16px; line-height: 1.1; gap: 2px 8px; }
+  .word.editable { min-height: 34px; }
+  .rule.fixed { font-size: 12px; }
+  #chapter-note { font-size: 10px; }
+  #statusbar { display: flex; padding: 4px 8px; gap: 8px; font-size: 10px; }
+  #level-name { width: auto; flex: 1; }
+  #statusbar .stat { display: none; }
+  #statusbar .spacer { display: none; }
+  #statusbar button { min-height: 40px; }
+  #pad { --pad-btn: 44px; }
+  .wb-word { padding: 7px; }
+  .wb-word small { font-size: 10px; }
+  #editor.sheet { width: min(440px, 100%); left: 50%; right: auto; transform: translateX(-50%); padding: 10px 14px; animation: fadeIn .15s ease-out; }
+  body.in-menu #mobile-menu { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: auto auto auto auto auto auto; align-content: center; justify-items: center; gap: 8px 28px; padding: 20px 45px; }
+  #mobile-menu > :nth-child(1) { grid-area: 1 / 1; }
+  #mobile-menu h1 { grid-area: 2 / 1; font-size: 58px; }
+  #mobile-menu .mobile-subtitle { grid-area: 3 / 1; font-size: 20px; }
+  #mobile-begin { grid-area: 4 / 1; margin: 0; }
+  #mobile-menu .mobile-chapters { grid-area: 5 / 1 / 7 / 2; gap: 5px; }
+  .mobile-chapters button { min-width: 36px; min-height: 38px; padding: 6px 10px; }
+  #mobile-menu > :nth-child(6) { grid-area: 1 / 2; }
+  #mobile-menu .mobile-outfits { grid-area: 2 / 2 / 5 / 3; }
+  #mobile-menu details { grid-area: 5 / 2; }
+  #mobile-menu > a { grid-area: 6 / 2; min-height: 30px; padding: 5px; }
+  .mobile-portrait { width: 64px; height: 64px; background-size: 256px 256px; }
+  .mobile-outfits button { font-size: 11px; }
+}

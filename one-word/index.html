@@ -10,13 +10,22 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%2314121c'/><rect x='3' y='5' width='10' height='6' rx='1' fill='none' stroke='%23ffd166' stroke-width='1.5'/></svg>" />
 </head>
 <body class="in-menu">
+  <section id="rotate-screen" hidden role="dialog" aria-modal="true" aria-labelledby="rotate-title">
+    <div class="rotate-phone" aria-hidden="true">↻</div>
+    <p class="mobile-eyebrow">THE LIVING MANUSCRIPT</p>
+    <h1 id="rotate-title">Turn the page sideways</h1>
+    <p>Rotate your phone to landscape to play.</p>
+    <p class="rotate-note">Your chapter will wait right here.</p>
+  </section>
   <div id="app">
     <header id="rulebar">
       <div class="rule-label">REWRITE THE MANUSCRIPT</div>
       <div id="rules"></div>
+      <div id="chapter-note"></div>
       <div id="tutorial-tip" hidden>CLICK THIS WORD</div>
     </header>
 
+    <div id="play-area">
     <main id="game">
       <nav id="mobile-menu" aria-label="Story menu"></nav>
       <div id="pad" hidden aria-label="Movement controls">
@@ -27,6 +36,12 @@
         <button class="pad-btn" data-dir="down" aria-label="move down">▼</button>
       </div>
     </main>
+    <aside id="wordbook" aria-label="Unlocked words">
+      <h2>YOUR WORDS <span id="wb-count">0</span></h2>
+      <p id="wb-chapter"></p>
+      <div id="wb-list"></div>
+    </aside>
+    </div>
 
     <footer id="statusbar">
       <span id="level-name"></span>
@@ -70,6 +85,8 @@
       </div>
     </div>
   </div>
+
+  <button id="btn-sound" type="button" aria-label="Mute">♪</button>
 
   <div id="toast"></div>
   <script type="module" src="/src/main.ts"></script>

@@ -37,6 +37,7 @@ interface Draft {
   cells: string[][];
   rules: RuleDefinition[];
   solutions: string[][] | null;
+  maxChanges?: number;
   saved?: { path: string; rank: number };
 }
 
@@ -57,6 +58,7 @@ function vocabulary(part: RulePart): readonly string[] {
 export class LevelEditor {
   private name = 'MY LEVEL';
   private rank = nextFreeRank();
+  private maxChanges = 1;
   private cells: string[][] = STARTER_MAP.map((row) => [...row]);
   private rules: RuleDefinition[] = [{
     subject: 'YOU', verb: 'DIE', condition: 'ON_RED',
@@ -81,6 +83,7 @@ export class LevelEditor {
       this.cells = draft.cells;
       this.rules = draft.rules;
       this.solutions = draft.solutions;
+      this.maxChanges = draft.maxChanges ?? 1;
     }
     this.build();
     this.renderPalette();
@@ -105,6 +108,10 @@ export class LevelEditor {
     rankInput.addEventListener('input', () => {
       this.rank = Math.max(1, Number(rankInput.value) || 1);
       this.renderSource();
+    });
+
+    const changes = select(['1', '2', '3', '4'], String(this.maxChanges), value => {
+      this.maxChanges = Number(value); this.invalidate();
     });
 
     const size = el('div', { className: 'size-controls' }, [
@@ -138,7 +145,7 @@ export class LevelEditor {
         ]),
         el('section', { className: 'pane' }, [
           el('h2', { textContent: 'LEVEL' }),
-          el('div', { className: 'fields' }, [field('NAME', nameInput), field('NUMBER', rankInput)]),
+          el('div', { className: 'fields' }, [field('NAME', nameInput), field('NUMBER', rankInput), field('WORDS CHANGED AT ONCE', changes)]),
           this.rulePane,
           el('div', { className: 'actions' }, [verify, save]),
           this.statusLine,
@@ -349,6 +356,7 @@ export class LevelEditor {
       map: this.cells.map((row) => row.join('')),
       rules: this.rules,
       solutions: this.solutions ?? [],
+      maxChanges: this.maxChanges,
     };
   }
 
@@ -383,7 +391,7 @@ export class LevelEditor {
 
   private storeDraft(saved?: { path: string; rank: number }) {
     const draft: Draft = {
-      name: this.name, rank: this.rank, cells: this.cells, rules: this.rules, solutions: this.solutions, saved,
+      name: this.name, rank: this.rank, cells: this.cells, rules: this.rules, solutions: this.solutions, maxChanges: this.maxChanges, saved,
     };
     try {
       sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft));

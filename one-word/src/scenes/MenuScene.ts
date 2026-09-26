@@ -1,9 +1,13 @@
 import Phaser from 'phaser';
 import { VIEW_W, VIEW_H, RENDER_SCALE } from '../config/Display';
 import { LEVELS } from '../levels/levels';
+import { audio } from '../ui/Audio';
+import { sfx } from '../ui/Sfx';
+import { progress } from '../config/Progress';
+import { portraitBlocked } from '../ui/Device';
 import { session } from '../config/Session';
-import { openAIKey, setOpenAIKey } from '../config/GameConfig';
-import { character, createCharacterAnimations, loadCharacters, OUTFITS, pose, reducedMotion, type Outfit } from '../config/Character';
+import { aiProvider, setAIKey } from '../config/GameConfig';
+import { character, createCharacterAnimations, loadCharacters, OUTFITS, outfitUnlocked, pose, reducedMotion, type Outfit } from '../config/Character';
 
 const MONO = '"Space Mono", monospace';
 const SERIF = '"Cormorant Garamond", Georgia, serif';
@@ -29,6 +33,7 @@ export class MenuScene extends Phaser.Scene {
     this.scale.setGameSize(VIEW_W * RENDER_SCALE, VIEW_H * RENDER_SCALE);
     this.cameras.main.setZoom(RENDER_SCALE).centerOn(VIEW_W / 2, VIEW_H / 2);
     this.cameras.main.resetFX();
+    audio.playMusic('menu', 1);
     this.turning = false; this.modal = false; this.outfitViews = [];
     document.body.classList.add('in-menu');
     // The HUD changes the parent size; refresh its bounds before mapping pointer input.
@@ -54,7 +59,7 @@ export class MenuScene extends Phaser.Scene {
     this.label(W / 2, 433, 'CHAPTERS', 9, MONO, '#c5baa4').setLetterSpacing(3);
     LEVELS.forEach((level, i) => {
       const x = W / 2 + (i - (LEVELS.length - 1) / 2) * Math.min(42, 750 / LEVELS.length);
-      const solved = session.best.has(level.id);
+      const solved = progress.has(level.id) || session.best.has(level.id);
       const row = this.add.rectangle(x, 465, 32, 30, 0x10232c, 0.85).setStrokeStyle(1, solved ? 0x8fcbb3 : 0x72674f, 0.8).setInteractive({ useHandCursor: true }).setName(`chapter-${i + 1}`);
       this.label(x, 465, ['I', 'II', 'III', 'IV', 'V', 'VI'][i] ?? String(level.id), 18, SERIF, solved ? '#8fcbb3' : '#eadabd');
       row.on('pointerover', () => row.setFillStyle(0x68583a));
@@ -104,7 +109,10 @@ export class MenuScene extends Phaser.Scene {
       const portrait = document.createElement('span'); portrait.className = 'mobile-portrait';
       portrait.style.backgroundImage = `url("${import.meta.env.BASE_URL}art/runtime/${outfit.id}-walk.png")`;
       const label = document.createElement('span'); label.textContent = outfit.name;
-      button.append(portrait, label); button.setAttribute('aria-pressed', String(character.outfit === outfit.id));
+      button.append(portrait, label);
+      button.disabled = !outfitUnlocked(outfit.id);
+      if (button.disabled) { const lock = document.createElement('small'); lock.textContent = `Complete chapter ${outfit.unlockAfter}`; button.append(lock); }
+      button.setAttribute('aria-pressed', String(character.outfit === outfit.id));
       button.onclick = () => {
         this.select(outfit.id);
         outfits.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b === button)));
@@ -123,13 +131,15 @@ export class MenuScene extends Phaser.Scene {
   }
 
   private select(outfit: Outfit) {
+    if (!outfitUnlocked(outfit)) return;
     if (this.turning || (this.modal && !this.wardrobeOpen)) return;
     character.select(outfit); this.refreshOutfit();
   }
 
   private cycle(step: number) {
-    const index = OUTFITS.findIndex(outfit => outfit.id === character.outfit);
-    this.select(OUTFITS[(index + step + OUTFITS.length) % OUTFITS.length].id);
+    const available = OUTFITS.filter(outfit => outfitUnlocked(outfit.id));
+    const index = available.findIndex(outfit => outfit.id === character.outfit);
+    this.select(available[(index + step + available.length) % available.length].id);
   }
 
   private refreshOutfit() {
@@ -138,7 +148,9 @@ export class MenuScene extends Phaser.Scene {
       const selected = view.id === character.outfit;
       view.border.setStrokeStyle(selected ? 2 : 1, selected ? 0xa36d35 : 0x987747, selected ? 0.9 : 0.25).setFillStyle(0xccaa69, selected ? 0.2 : 0.04);
       view.label.setColor(selected ? '#713f24' : '#765c3d');
-      view.sprite.setAlpha(selected ? 1 : 0.7);
+      const unlocked = outfitUnlocked(view.id);
+      view.sprite.setAlpha(unlocked ? (selected ? 1 : 0.7) : 0.25);
+      if (!unlocked) view.label.setText(`CHAPTER ${OUTFITS.find(o => o.id === view.id)!.unlockAfter}`);
       if (selected) pose(view.sprite, view.id, 'down', 'idle');
       else view.sprite.stop().setFrame(0);
     }
@@ -187,7 +199,8 @@ export class MenuScene extends Phaser.Scene {
   }
 
   private start(levelIndex: number) {
-    if (this.turning || this.modal) return;
+    if (portraitBlocked() || this.turning || this.modal) return;
+    sfx.click();
     this.turning = true;
     if (reducedMotion()) { this.scene.start('game', { levelIndex }); return; }
     this.cameras.main.fadeOut(260, 13, 26, 32);
@@ -199,7 +212,7 @@ export class MenuScene extends Phaser.Scene {
     this.label(x, y, text, 9, MONO, primary ? '#14212a' : '#eadabd').setLetterSpacing(1);
     bg.on('pointerover', () => bg.setAlpha(0.8));
     bg.on('pointerout', () => bg.setAlpha(1));
-    bg.on('pointerdown', onClick);
+    bg.on('pointerdown', () => { sfx.click(); onClick(); });
     return bg;
   }
 
@@ -215,11 +228,11 @@ export class MenuScene extends Phaser.Scene {
     const example = this.add.text(W / 2, 354, 'YOU DIE ON RED  →  YOU HIDE ON RED', { resolution: RENDER_SCALE, fontFamily: MONO, fontSize: '14px', color: '#d6b575' }).setOrigin(0.5);
     const close = this.add.text(W / 2, 412, 'CLICK ANYWHERE TO CLOSE', { resolution: RENDER_SCALE, fontFamily: MONO, fontSize: '10px', color: '#9da99f' }).setOrigin(0.5);
     const ai = this.add.text(W / 2, 385, '', { resolution: RENDER_SCALE, fontFamily: MONO, fontSize: '9px', color: '#b4bebd' }).setOrigin(0.5).setInteractive({ useHandCursor: true });
-    const refresh = () => ai.setText(`WORD INTERPRETER: ${openAIKey() ? 'AI' : 'LOCAL'} · CONFIGURE`);
+    const refresh = () => ai.setText(`WORD INTERPRETER: ${aiProvider()?.name.toUpperCase() ?? 'LOCAL'} · CONFIGURE`);
     refresh();
     ai.on('pointerdown', () => {
-      const key = window.prompt('Optional OpenAI key for unfamiliar words. Stored only in this browser. Leave empty to use the local dictionary.', '');
-      if (key !== null) { setOpenAIKey(key.trim()); refresh(); }
+      const key = window.prompt('Optional Gemini or OpenAI key for unfamiliar words. Stored only in this browser. Leave empty to use the local dictionary.', '');
+      if (key !== null) { setAIKey(key.trim()); refresh(); }
     });
     layer.add([shade, panel, title, body, example, ai, close]);
     shade.on('pointerdown', () => { this.modal = false; layer.destroy(); });

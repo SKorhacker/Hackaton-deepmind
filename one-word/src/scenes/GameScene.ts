@@ -1,12 +1,18 @@
 import Phaser from 'phaser';
 import { VIEW_W, VIEW_H, RENDER_SCALE } from '../config/Display';
-import { COLORS, DEBUG_MODE, OPENAI_MODEL, TILE, openAIKey } from '../config/GameConfig';
+import { COLORS, DEBUG_MODE, TILE } from '../config/GameConfig';
 import { LEVELS } from '../levels/levels';
 import { T, type LevelData, type Pos } from '../levels/LevelData';
 import type { Mechanic } from '../rules/RuleDefinition';
 import { ruleTokens } from '../rules/RuleParser';
 import { RuleManager } from '../rules/RuleManager';
-import { LLMWordInterpreter } from '../rules/LLMWordInterpreter';
+import { createInterpreter } from '../rules/createInterpreter';
+import { normalizeWord } from '../rules/WordInterpreter';
+import { WordBook } from '../ui/WordBook';
+import { audio } from '../ui/Audio';
+import { progress } from '../config/Progress';
+import { OUTFITS } from '../config/Character';
+import { portraitBlocked } from '../ui/Device';
 import { World, type WorldEvent } from '../systems/World';
 import { RuleEditor } from '../ui/RuleEditor';
 import { LevelCompleteUI } from '../ui/LevelCompleteUI';
@@ -23,6 +29,7 @@ const FONT = '"Space Mono", monospace';
 let editor: RuleEditor;
 let complete: LevelCompleteUI;
 let pad: TouchPad;
+let wordbook: WordBook;
 
 // What a tile looks like under the current rule.
 const TILE_GLYPH: Partial<Record<Mechanic, string>> = {
@@ -47,7 +54,7 @@ const KEYMAP: Record<string, Pos> = {
   ArrowRight: { x: 1, y: 0 }, d: { x: 1, y: 0 }, D: { x: 1, y: 0 },
 };
 
-interface GuardView { box: Phaser.GameObjects.Container; body: Phaser.GameObjects.Arc; icon: Phaser.GameObjects.Text; sprite: Phaser.GameObjects.Image; lastVerb: string }
+interface GuardView { box: Phaser.GameObjects.Container; body: Phaser.GameObjects.Arc; icon: Phaser.GameObjects.Text; sprite: Phaser.GameObjects.Image; lastVerb: string; dying?: boolean }
 
 export class GameScene extends Phaser.Scene {
   private levelIndex = 0;
@@ -57,7 +64,7 @@ export class GameScene extends Phaser.Scene {
 
   private ox = 0;
   private oy = 0;
-  private glyphs: { t: Phaser.GameObjects.Text; tile: T }[] = [];
+  private glyphs: { t: Phaser.GameObjects.Text; g: Phaser.GameObjects.Text; tile: T }[] = [];
   private plates: { r: Phaser.GameObjects.Image; x: number; y: number; scale: number }[] = [];
   private doors: Phaser.GameObjects.Container[] = [];
   private keys: Phaser.GameObjects.Container[] = [];
@@ -81,6 +88,11 @@ export class GameScene extends Phaser.Scene {
   private wordsTried = 0;
   private deaths = 0;
   private finished = false;
+  private lastSlot = 0;
+  private runWords = new Map<string, { word: string; token: string; ai: boolean }>();
+  private slotWords = new Map<number, { word: string; token: string; ai: boolean }>();
+  private unlockedSkins: string[] = [];
+  private unlockedWords: string[] = [];
   private down: { x: number; y: number; wx: number; wy: number } | null = null;
   private layoutObserver?: ResizeObserver;
   private onPadResize = () => this.layout();
@@ -90,7 +102,7 @@ export class GameScene extends Phaser.Scene {
 
   preload() {
     loadCharacters(this);
-    this.load.spritesheet('sentinel-states', `${import.meta.env.BASE_URL}art/runtime/sentinel-states.png`, { frameWidth: 512, frameHeight: 512 });
+    for (const kind of ['sentinel', 'owl', 'wraith']) this.load.spritesheet(`${kind}-states`, `${import.meta.env.BASE_URL}art/runtime/${kind}-states.png`, { frameWidth: 512, frameHeight: 512 });
     for (const name of ['player', 'guard', 'exit', 'door', 'key', 'plate']) {
       this.load.image(`painted-${name}`, `${import.meta.env.BASE_URL}art/runtime/${name}.png`);
     }
@@ -107,6 +119,7 @@ export class GameScene extends Phaser.Scene {
     this.turnTimer = undefined; this.outcomeTimer = undefined; this.outcomeFx = undefined; this.down = null;
     this.wordsTried = 0; this.deaths = 0;
     this.facing = 'down'; this.walkUntil = 0;
+    this.lastSlot = 0; this.runWords.clear(); this.slotWords.clear(); this.unlockedSkins = []; this.unlockedWords = [];
   }
 
   create() {
@@ -119,13 +132,13 @@ export class GameScene extends Phaser.Scene {
     this.scale.refresh();
     editor ??= new RuleEditor();
     complete ??= new LevelCompleteUI();
+    wordbook ??= new WordBook();
     pad ??= new TouchPad();
     pad.onDir = dir => this.turn(dir);
     complete.hide();
     editor.close();
 
-    const key = openAIKey();
-    this.rules = new RuleManager(this.level.rules, key ? new LLMWordInterpreter(key, OPENAI_MODEL) : null);
+    this.rules = new RuleManager(this.level.rules, createInterpreter(), this.level.maxChanges ?? 1);
     this.world = new World(this.level, this.rules.rules);
 
     const W = VIEW_W, H = VIEW_H;
@@ -144,12 +157,19 @@ export class GameScene extends Phaser.Scene {
     this.aiNote = this.add.text(W / 2, H - 8, '', { resolution: RENDER_SCALE, fontFamily: FONT, fontSize: '13px', color: '#8a85a0' }).setOrigin(0.5, 1).setDepth(40);
 
     // Bind DOM UI to this level.
-    editor.onSelect = (ruleIndex, part) => this.rules.select(ruleIndex, part);
-    editor.resetSelection();
     editor.setSuggestions(this.level.hintWords ?? []);
-    editor.onSubmit = (raw) => this.submitWord(raw);
-    editor.onOpen = () => { if (this.level.tutorial && !session.tutorialDone) editor.setTutorial('type'); };
-    editor.render(this.rules.rules, this.rules.slots);
+    editor.onSubmit = (raw, slot) => this.submitWord(raw, slot);
+    editor.onOpen = () => {
+      this.lastSlot = editor.slot;
+      editor.setUnlockedWords(wordbook.words(this.rules.allowed(editor.slot)));
+      if (this.level.tutorial && !session.tutorialDone) editor.setTutorial('type');
+    };
+    editor.render(this.rules.rules, this.rules.slots, this.rules.changedSlots);
+    wordbook.setLevel(this.level.id, this.rules.slots.flatMap(slot => slot.allowedReplacements));
+    wordbook.onPick = (word, token) => {
+      const slot = this.rules.allowed(this.lastSlot)?.includes(token) ? this.lastSlot : this.rules.slots.findIndex(s => s.allowedReplacements.includes(token));
+      if (slot >= 0 && !this.locked && !this.finished) editor.open(slot, word);
+    };
     editor.setTutorial(this.level.tutorial && !session.tutorialDone ? 'click' : null);
     document.getElementById('level-name')!.textContent = `LEVEL ${this.level.id} · ${this.level.name}`;
     (document.getElementById('btn-restart') as HTMLButtonElement).onclick = () => this.restart();
@@ -168,6 +188,8 @@ export class GameScene extends Phaser.Scene {
     this.events.once('shutdown', () => { window.removeEventListener('keydown', this.onKey); this.layoutObserver?.disconnect(); window.removeEventListener('oneword-pad-resize', this.onPadResize); pad.onDir = () => {}; });
 
     this.startTime = this.time.now;
+    this.updateMusic(0.8);
+    document.getElementById('chapter-note')!.textContent = this.level.intro ?? (this.rules.slots.length > 1 ? `Up to ${this.rules.maxChanges} changed ${this.rules.maxChanges === 1 ? 'word' : 'words'} at a time.` : '');
     this.updateStats();
     this.sync(false);
     this.cameras.main.fadeIn(250, 20, 18, 28);
@@ -212,7 +234,8 @@ export class GameScene extends Phaser.Scene {
             resolution: RENDER_SCALE, fontFamily: FONT, fontSize: '22px', fontStyle: 'bold', color: '#fff1d4',
           }).setOrigin(0.5).setAlpha(0.8).setDepth(1);
           glyph.setShadow(0, 1, '#331b18', 3, true, true);
-          this.glyphs.push({ t: glyph, tile });
+          const guardGlyph = this.add.text(this.px(x) + 15, this.py(y) - 16, '', { resolution: RENDER_SCALE, fontFamily: FONT, fontSize: '11px', color: '#ffd9a7', backgroundColor: '#182b34', padding: { x: 2, y: 1 } }).setOrigin(0.5).setDepth(1);
+          this.glyphs.push({ t: glyph, g: guardGlyph, tile });
         } else if (tile === T.EXIT) {
           const glow = this.add.ellipse(this.px(x), this.py(y) + 15, 45, 16, COLORS.exit, 0.3).setDepth(1);
           this.art('exit', this.px(x), this.py(y) - 2, 51).setDepth(1);
@@ -252,7 +275,8 @@ export class GameScene extends Phaser.Scene {
       const shadow = this.add.ellipse(0, 19, 39, 11, 0x000000, 0.4);
       // A colored intent ring supplements the symbol, leaving painted materials intact.
       const body = this.add.circle(0, 5, 23, COLORS.guard, 0.14).setStrokeStyle(1, COLORS.guard, 0.8);
-      const sprite = this.add.image(0, 22, 'sentinel-states', 0).setOrigin(0.5, 0.95).setDisplaySize(60, 60);
+      const kind = ['sentinel', 'owl', 'wraith'][(Math.max(0, this.level.id - 2) + g.id) % 3];
+      const sprite = this.add.image(0, 22, `${kind}-states`, 0).setOrigin(0.5, 0.95).setDisplaySize(60, 60);
       const icon = this.add.text(18, -22, '', {
         resolution: RENDER_SCALE, fontFamily: FONT, fontSize: '12px', fontStyle: 'bold', color: '#ffffff',
         backgroundColor: '#152631', padding: { x: 3, y: 2 },
@@ -295,8 +319,10 @@ export class GameScene extends Phaser.Scene {
 
     // Tiles reflect what the rules currently say they do.
     for (const gl of this.glyphs) {
-      const verb = this.world.youVerbOn(gl.tile);
+      const verb = this.world.verbOn('YOU', gl.tile);
       gl.t.setText(verb ? TILE_GLYPH[verb] ?? '' : '');
+      const guardVerb = this.world.verbOn('GUARD', gl.tile);
+      gl.g.setText(guardVerb && guardVerb !== verb ? TILE_GLYPH[guardVerb] ?? '' : '').setVisible(!!guardVerb && guardVerb !== verb);
     }
     for (const pl of this.plates) {
       const down = (s.player.x === pl.x && s.player.y === pl.y) || !!this.world.guardAt(pl.x, pl.y);
@@ -309,13 +335,15 @@ export class GameScene extends Phaser.Scene {
     s.keys.forEach((k, i) => { if (k.taken) this.keys[i].setVisible(false); });
 
     // Guards.
+    for (const [id, view] of this.guards) if (!s.guards.some(g => g.id === id) && view.box.visible && !view.dying) this.poofGuard(id);
     for (const g of s.guards) {
       const v = this.guards.get(g.id)!;
       const intent = this.world.guardIntent(g);
       const st = guardStyle(intent.verb);
       v.body.setFillStyle(st.color, 0.14).setStrokeStyle(1, st.color, 0.85);
       v.icon.setText(st.icon).setColor(Phaser.Display.Color.IntegerToColor(st.color).rgba);
-      v.sprite.setFrame(intent.verb === 'SLEEP' ? 1 : intent.verb === 'FREEZE' ? 3 : ['HELP', 'FOLLOW', 'FLEE'].includes(intent.verb) ? 2 : 0);
+      v.sprite.setFrame(g.frozen > 0 ? 3 : intent.verb === 'SLEEP' ? 1 : intent.verb === 'FREEZE' ? 3 : ['HELP', 'FOLLOW', 'FLEE'].includes(intent.verb) ? 2 : 0);
+      if (g.frozen > 0) v.icon.setText(`❄${g.frozen}`).setColor('#9fdcff');
       v.box.setAlpha(1);
       this.tweens.killTweensOf(v.box);
       if (animate) this.tweens.add({ targets: v.box, x: this.px(g.x), y: this.py(g.y), duration: this.stepDuration(), ease: 'Sine.easeInOut' });
@@ -416,12 +444,13 @@ export class GameScene extends Phaser.Scene {
   }
 
   private handleKey(e: KeyboardEvent) {
+    if (portraitBlocked()) return;
     if (editor.isOpen || (e.target as HTMLElement)?.tagName === 'INPUT') return;
     if (complete.isOpen) return;
     if (e.key === '`') { this.debug = !this.debug; this.drawDebug(); return; }
     if (e.key === 'r' || e.key === 'R') { e.preventDefault(); this.restart(); return; }
     if (e.key === 'Escape') { this.toMenu(); return; }
-    if (e.key === 'Enter' || e.key === 'e' || e.key === 'E') { e.preventDefault(); editor.open(); return; }
+    if (e.key === 'Enter' || e.key === 'e' || e.key === 'E') { e.preventDefault(); editor.open(this.lastSlot); return; }
     const dir = KEYMAP[e.key];
     if (dir || e.key === ' ') {
       e.preventDefault();
@@ -433,7 +462,7 @@ export class GameScene extends Phaser.Scene {
   private moveDuration(steps: number) { return Math.max(1, steps) * this.stepDuration(); }
 
   private turn(dir: Pos | null) {
-    if (editor.isOpen || complete.isOpen || this.locked || this.finished || this.world.s.dead) return;
+    if (portraitBlocked() || editor.isOpen || complete.isOpen || this.locked || this.finished || this.world.s.dead) return;
     if (dir) this.facing = dir.x > 0 ? 'right' : dir.x < 0 ? 'left' : dir.y < 0 ? 'up' : 'down';
     const ev = this.world.step(dir);
     if (!ev.length) {
@@ -453,7 +482,7 @@ export class GameScene extends Phaser.Scene {
       pose(this.playerSprite, character.outfit, this.facing, 'idle');
       if (this.world.s.dead) this.onDeath();
       else if (this.world.s.won) this.onWin();
-      else this.locked = false;
+      else { this.locked = false; this.updateMusic(); }
     });
   }
 
@@ -467,9 +496,29 @@ export class GameScene extends Phaser.Scene {
         case 'freeze': sfx.freeze(); this.burst(this.world.s.player.x, this.world.s.player.y, COLORS.ice, 10); break;
         case 'key': sfx.key(); this.burst(e.x, e.y, COLORS.key, 16); this.floatText(e, 'UNLOCKED!', '#ffd166'); break;
         case 'door': sfx.door(); this.burst(e.x, e.y, COLORS.door, e.open ? 10 : 4); break;
-        case 'wait': break;
+        case 'guardDeath': this.poofGuard(e.id); break;
+        case 'guardBounce': sfx.bounce(); this.burst(e.x, e.y, COLORS.guard, 8); break;
+        case 'guardFreeze': sfx.freeze(); break;
+        case 'wait': sfx.wait(); break;
       }
     }
+  }
+
+  private poofGuard(id: number) {
+    const view = this.guards.get(id);
+    if (!view || view.dying || !view.box.visible) return;
+    view.dying = true;
+    sfx.freeze();
+    this.tweens.killTweensOf(view.box);
+    this.burst((view.box.x - this.ox - TILE / 2) / TILE, (view.box.y - this.oy - TILE / 2) / TILE, 0xd6b575, 12);
+    this.tweens.add({ targets: view.box, alpha: 0, duration: reducedMotion() ? 100 : 420, onComplete: () => view.box.setVisible(false) });
+  }
+
+  private updateMusic(fade = 1.2) {
+    if (this.finished) return;
+    const hunted = this.world.s.guards.some(g => this.world.guardIntent(g).lethal && !g.frozen);
+    const puzzle = this.world.s.doors.some(d => !d.open) || this.level.timed;
+    audio.playMusic(hunted ? 'tension' : puzzle ? 'mystery' : 'calm', fade);
   }
 
   private burst(tx: number, ty: number, color: number, n: number, up = false) {
@@ -540,6 +589,13 @@ export class GameScene extends Phaser.Scene {
 
   private onWin() {
     this.finished = true;
+    const newlyCompleted = progress.complete(this.level.id);
+    this.unlockedSkins = newlyCompleted ? OUTFITS.filter(o => o.unlockAfter === this.level.id).map(o => o.name) : [];
+    this.unlockedWords = [];
+    for (const word of this.runWords.values()) {
+      if (wordbook.add(word.word, word.token, word.ai, this.level.id)) this.unlockedWords.push(word.word.toUpperCase());
+    }
+    audio.playMusic('hope', 1);
     sfx.win();
     this.outcomeIllustration(true);
     this.playerSprite.stop();
@@ -563,10 +619,20 @@ export class GameScene extends Phaser.Scene {
   private resetWorld(fullReset: boolean) {
     this.clearOutcome();
     if (fullReset) {
+      this.slotWords.clear();
       this.rules.reset();
       editor.render(this.rules.rules, this.rules.slots);
     }
+    this.runWords.clear();
+    for (const [slot, word] of this.slotWords) {
+      if (this.rules.changedSlots.includes(slot) && this.rules.tokenAt(slot) === word.token) this.runWords.set(`${word.word}:${word.token}`, word);
+    }
     this.world = new World(this.level, this.rules.rules);
+    for (const [id, view] of this.guards) {
+      const guard = this.world.s.guards.find(g => g.id === id)!;
+      this.tweens.killTweensOf(view.box); view.dying = false;
+      view.box.setVisible(true).setAlpha(1).setScale(1).setPosition(this.px(guard.x), this.py(guard.y));
+    }
     this.tweens.killTweensOf(this.player);
     this.player.setScale(1).setAngle(0).setAlpha(1);
     this.facing = 'down'; this.walkUntil = 0;
@@ -574,6 +640,7 @@ export class GameScene extends Phaser.Scene {
     this.keys.forEach((k) => k.setVisible(true));
     this.locked = false;
     this.finished = false;
+    this.updateMusic(0.5);
     this.sync(false);
     this.updateStats();
   }
@@ -601,14 +668,15 @@ export class GameScene extends Phaser.Scene {
 
   // ---------------- the rewrite ----------------
 
-  private async submitWord(raw: string) {
-    if (this.locked || this.finished || this.world.s.dead) return { ok: false as const, message: 'LET THIS MOMENT FINISH FIRST.' };
+  private async submitWord(raw: string, slot: number) {
+    if (portraitBlocked() || this.locked || this.finished || this.world.s.dead) return { ok: false as const, message: 'LET THIS MOMENT FINISH FIRST.' };
     if (!raw.trim()) return { ok: false as const, message: 'TYPE A WORD.' };
-    const originalWorld = this.world, originalSlot = this.rules.slot;
+    if (!this.rules.slots[slot]) return { ok: false as const, message: 'CHOOSE A WORD FIRST.' };
+    const originalWorld = this.world;
     this.wordsTried++;
     this.updateStats();
-    const res = await this.rules.interpret(raw);
-    if (this.world !== originalWorld || this.rules.slot !== originalSlot || !this.scene.isActive()) return { ok: false as const, message: 'THIS PAGE HAS ALREADY TURNED.' };
+    const res = await this.rules.interpret(raw, slot);
+    if (this.world !== originalWorld || !this.scene.isActive()) return { ok: false as const, message: 'THIS PAGE HAS ALREADY TURNED.' };
     const early = this.levelIndex < 2 && this.level.hintWords;
     const hint = early ? `Try words like: ${this.level.hintWords!.join(', ')}` : undefined;
     if (!res.ok) {
@@ -619,15 +687,26 @@ export class GameScene extends Phaser.Scene {
         default: return { ok: false as const, message: "THE WORLD DOESN'T UNDERSTAND THAT WORD.", hint };
       }
     }
-    if (res.token === this.rules.currentToken) {
+    if (res.token === this.rules.tokenAt(slot)) {
       return { ok: false as const, message: "THAT'S ALREADY THE RULE." };
     }
     if (!this.scene.isActive() || this.finished || this.world.s.dead) return { ok: false as const, message: 'THIS PAGE HAS ALREADY TURNED.' };
-    editor.rememberWord(raw);
-    this.rules.apply(res.token);
-    this.world.setRules(this.rules.rules);
-    void editor.playRewrite(this.rules.rules, this.rules.slots);
+    const written = { word: normalizeWord(raw) ?? raw.trim(), token: res.token, ai: res.source === 'ai' };
+    this.runWords.set(`${written.word}:${written.token}`, written);
+    this.slotWords.set(slot, written);
+    this.lastSlot = slot;
+    const restored = this.rules.apply(slot, res.token);
+    for (const reverted of restored) this.slotWords.delete(reverted);
+    void editor.playRewrite(this.rules.rules, this.rules.slots, this.rules.changedSlots, [slot, ...restored]);
+    const events = this.world.setRules(this.rules.rules);
     this.playRewriteFx();
+    this.effects(events);
+    this.sync(true);
+    this.updateMusic();
+    if (this.world.s.dead) {
+      this.locked = true;
+      this.turnTimer = this.time.delayedCall(250, () => this.onDeath());
+    }
     if (res.source === 'ai') {
       this.aiNote.setText(`AI understood "${raw.trim().toLowerCase()}" as ${res.token}${res.note ? ` — ${res.note}` : ''}`).setAlpha(1);
       this.tweens.add({ targets: this.aiNote, alpha: 0.6, delay: 3000, duration: 800 });
@@ -651,6 +730,7 @@ export class GameScene extends Phaser.Scene {
     }
     for (const g of this.world.s.guards) {
       const v = this.guards.get(g.id)!;
+      if (v.dying) continue;
       this.tweens.add({ targets: v.box, alpha: { from: 0.55, to: 1 }, duration: 380, ease: 'Sine.easeOut' });
       this.burst(g.x, g.y, guardStyle(this.world.guardIntent(g).verb).color, 14);
     }
@@ -662,7 +742,7 @@ export class GameScene extends Phaser.Scene {
   // ---------------- level complete ----------------
 
   private showComplete() {
-    const token = comboKey(this.rules.currentWords);
+    const token = this.rules.solutionKey();
     const found = foundFor(this.level.id);
     const isNew = !found.has(token);
     found.add(token);
@@ -672,7 +752,7 @@ export class GameScene extends Phaser.Scene {
 
     const ruleHtml = this.rules.rules.map((r) => ruleTokens(r).map((t) => (t.editable ? `<span class="hl">${t.text}</span>` : t.text)).join(' ')).join('<br>');
     const solutions = this.level.solutions.map(comboKey);
-    const expected = solutions.includes(token);
+    const expected = !!this.level.timed || solutions.includes(token);
     const unfound = solutions.filter((s) => !found.has(s));
     const last = this.levelIndex === LEVELS.length - 1;
     complete.show({
@@ -684,6 +764,8 @@ export class GameScene extends Phaser.Scene {
         ['Words tried', String(this.wordsTried)],
         ['Deaths', String(this.deaths)],
         ['Solution', expected ? token : `${token} (unexpected!)`],
+        ...(this.unlockedWords.length ? [['Words unlocked', this.unlockedWords.join(', ')] as [string, string]] : []),
+        ...(this.unlockedSkins.length ? [['Skin unlocked', this.unlockedSkins.join(', ')] as [string, string]] : []),
       ],
       solutions: solutions.length > 1 ? { list: solutions, found } : null,
       nextLabel: last ? 'FINISH →' : 'NEXT LEVEL →',

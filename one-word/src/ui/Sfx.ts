@@ -1,41 +1,105 @@
-// Tiny WebAudio synth. Silently does nothing if audio is unavailable.
+// Game cues. Small, frequent events are synthesised here (no load, no latency);
+// the big ones play generated samples through the same bus — see Audio.ts.
+import { audio } from './Audio';
 
-let ctx: AudioContext | null = null;
-function ac(): AudioContext | null {
-  try {
-    ctx ??= new AudioContext();
-    if (ctx.state === 'suspended') void ctx.resume();
-    return ctx;
-  } catch { return null; }
+let noiseBuffer: AudioBuffer | null = null;
+
+function noise(ctx: AudioContext) {
+  if (!noiseBuffer || noiseBuffer.sampleRate !== ctx.sampleRate) {
+    noiseBuffer = ctx.createBuffer(1, ctx.sampleRate * 0.5, ctx.sampleRate);
+    const d = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  }
+  return noiseBuffer;
 }
 
-function tone(freq: number, dur: number, type: OscillatorType = 'square', vol = 0.06, slideTo?: number, delay = 0) {
-  const a = ac();
-  if (!a) return;
-  const t = a.currentTime + delay;
-  const o = a.createOscillator();
-  const g = a.createGain();
-  o.type = type;
-  o.frequency.setValueAtTime(freq, t);
-  if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
-  g.gain.setValueAtTime(vol, t);
-  g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-  o.connect(g).connect(a.destination);
-  o.start(t);
-  o.stop(t + dur + 0.02);
+interface ToneOpts {
+  type?: OscillatorType;
+  vol?: number;
+  slideTo?: number;
+  delay?: number;
+  /** Low-pass corner: keeps the square/saw voices woody instead of buzzy. */
+  cutoff?: number;
+  attack?: number;
 }
+
+function tone(freq: number, dur: number, o: ToneOpts = {}) {
+  const ctx = audio.context;
+  const dest = audio.sfxDestination;
+  if (!ctx || !dest) return;
+  const { type = 'triangle', vol = 0.06, slideTo, delay = 0, cutoff = 3000, attack = 0.004 } = o;
+  const t = ctx.currentTime + delay;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.setValueAtTime(cutoff, t);
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, t);
+  if (slideTo) osc.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+  gain.gain.setValueAtTime(0.0001, t);
+  gain.gain.exponentialRampToValueAtTime(vol, t + attack);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  osc.connect(lp).connect(gain).connect(dest);
+  osc.start(t);
+  osc.stop(t + dur + 0.02);
+}
+
+/** Filtered noise burst: footsteps, cloth, air. */
+function air(dur: number, from: number, to: number, vol = 0.05, delay = 0, q = 1) {
+  const ctx = audio.context;
+  const dest = audio.sfxDestination;
+  if (!ctx || !dest) return;
+  const t = ctx.currentTime + delay;
+  const src = ctx.createBufferSource();
+  src.buffer = noise(ctx);
+  const bp = ctx.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.Q.value = q;
+  bp.frequency.setValueAtTime(from, t);
+  bp.frequency.exponentialRampToValueAtTime(to, t + dur);
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.0001, t);
+  gain.gain.exponentialRampToValueAtTime(vol, t + Math.min(0.02, dur / 3));
+  gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  src.connect(bp).connect(gain).connect(dest);
+  src.start(t);
+  src.stop(t + dur + 0.02);
+}
+
+// Slight detune per step so walking never sounds like a metronome.
+const wobble = () => 1 + (Math.random() - 0.5) * 0.08;
 
 export const sfx = {
-  move: () => tone(220, 0.05, 'triangle', 0.05),
-  bump: () => tone(90, 0.08, 'square', 0.04),
-  bounce: () => tone(300, 0.14, 'sine', 0.08, 900),
-  rewrite: () => { tone(400, 0.09, 'square', 0.05); tone(600, 0.09, 'square', 0.05, undefined, 0.08); tone(900, 0.2, 'triangle', 0.06, 1400, 0.16); },
-  invalid: () => { tone(160, 0.12, 'sawtooth', 0.04); tone(120, 0.16, 'sawtooth', 0.04, undefined, 0.1); },
-  door: () => tone(140, 0.25, 'triangle', 0.08, 70),
-  key: () => { tone(880, 0.08, 'square', 0.05); tone(1320, 0.16, 'square', 0.05, undefined, 0.07); },
-  hide: () => tone(500, 0.2, 'sine', 0.05, 250),
-  heal: () => { tone(520, 0.1, 'sine', 0.06); tone(780, 0.18, 'sine', 0.06, undefined, 0.08); },
-  freeze: () => tone(1200, 0.25, 'sine', 0.04, 600),
-  death: () => { tone(196, 0.45, 'triangle', 0.045, 98); tone(147, 0.65, 'sine', 0.035, 73, 0.12); },
-  win: () => [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.48, 'sine', 0.045, undefined, i * 0.14)),
+  /** Step on wood: a soft tick with a little body. */
+  move: () => {
+    tone(150 * wobble(), 0.06, { type: 'triangle', vol: 0.05, cutoff: 1200 });
+    air(0.05, 2200, 900, 0.018);
+  },
+  /** Walking into a wall. */
+  bump: () => {
+    tone(84, 0.1, { type: 'sine', vol: 0.07, cutoff: 500, slideTo: 62 });
+    air(0.06, 800, 300, 0.02);
+  },
+  bounce: () => {
+    tone(260, 0.16, { type: 'triangle', vol: 0.07, slideTo: 760, cutoff: 2600 });
+    tone(520, 0.1, { type: 'sine', vol: 0.03, slideTo: 1400, delay: 0.02 });
+  },
+  /** Slipping out of sight. */
+  hide: () => {
+    air(0.35, 3200, 420, 0.05, 0, 0.7);
+    tone(330, 0.3, { type: 'sine', vol: 0.035, slideTo: 165, cutoff: 1500 });
+  },
+  /** A turn passes with no move. */
+  wait: () => tone(120, 0.07, { type: 'sine', vol: 0.025, cutoff: 700 }),
+
+  rewrite: () => audio.playSfx('rewrite'),
+  invalid: () => audio.playSfx('invalid'),
+  door: () => audio.playSfx('door'),
+  key: () => audio.playSfx('key'),
+  heal: () => audio.playSfx('heal'),
+  freeze: () => audio.playSfx('freeze'),
+  click: () => audio.playSfx('click'),
+  death: () => { audio.playSfx('death'); audio.playSting('lose'); },
+  win: () => { audio.playSfx('win'); audio.playSting('win'); },
 };
