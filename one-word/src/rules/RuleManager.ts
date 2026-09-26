@@ -70,11 +70,11 @@ export class RuleManager {
     const allowed = this.allowed(slot);
     const open = this.open(slot);
     const local = lookupLocal(word);
-    if (local && (allowed.includes(local) || (open && registry.has(local)))) {
-      return { ok: true, token: local, source: 'local' };
+    if (!open) {
+      if (local && allowed.includes(local)) return { ok: true, token: local, source: 'local' };
+      // A word the dictionary already knows keeps its meaning — the AI only handles unknown words.
+      if (local) return { ok: false, reason: 'not-here', token: local };
     }
-    // A word the dictionary already knows keeps its meaning — the AI only handles unknown words.
-    if (local && !open) return { ok: false, reason: 'not-here', token: local };
 
     // Only the word being rewritten is blanked; the others read as they are.
     const s = this.slots[slot];
@@ -82,9 +82,13 @@ export class RuleManager {
     const sentence = tokens.map((t) => (t.part === s.part ? '___' : t.text)).join(' ');
     const current = tokens.find((t) => t.part === s.part)?.text ?? '';
 
+    // In dynamic mode the dictionary is skipped: the typed word gets its own
+    // mechanic instead of collapsing onto the nearest shipped one. The
+    // dictionary is only a fallback for when the model can't answer.
     if (this.dynamic && open) {
       const token = await this.dynamic.invent(word, { sentence, current });
       if (token) return { ok: true, token, source: 'ai', note: this.dynamic.lastNote };
+      if (local && registry.has(local)) return { ok: true, token: local, source: 'local' };
     }
 
     if (this.llm) {
