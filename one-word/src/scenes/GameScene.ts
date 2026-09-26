@@ -141,7 +141,7 @@ export class GameScene extends Phaser.Scene {
     wordbook.onPick = (w) => editor.open(this.lastSlot >= 0 ? this.lastSlot : this.rules.slots[0], w);
     wordbook.render();
     editor.setTutorial(this.level.tutorial && !session.tutorialDone ? 'click' : null);
-    editor.setSuggestions(this.level.hintWords ?? []);
+    editor.setSuggestions([...(this.level.hintWords ?? []), ...wordbook.words()]);
     document.querySelector('.keys')!.textContent = isTouch()
       ? 'SWIPE or TAP a tile to move · TAP the rule word'
       : 'WASD / ARROWS move · SPACE wait';
