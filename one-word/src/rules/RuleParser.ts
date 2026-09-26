@@ -12,8 +12,14 @@ export interface RuleToken {
 /** A word takes an object only if it says something about moving towards or away from one. */
 const takesObject = (verb: Mechanic) => !!registry.get(verb)?.motion;
 
+// A player may type a verb that is already third person ("HELPS", "DIES").
+// A single S after another letter reads as that ending; doubled or sibilant
+// endings (PASS, RUSH, FIX) are part of the stem and still take -ES.
+const inflected = (verb: string) => /[^SHCXZ]S$/.test(verb) && verb.length > 3;
+
 export function conjugate(verb: Mechanic, subject: string): string {
-  if (subject === 'YOU') return verb;
+  if (subject === 'YOU') return inflected(verb) ? verb.slice(0, -1) : verb;
+  if (inflected(verb)) return verb;
   if (/(S|SH|CH|X|Z)$/.test(verb)) return verb + 'ES';
   return verb + 'S';
 }

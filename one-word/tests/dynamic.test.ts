@@ -8,7 +8,7 @@
 //   npm test
 
 import { loadLevels } from './loadLevels';
-import { withReplacement } from '../src/rules/RuleParser';
+import { conjugate, withReplacement } from '../src/rules/RuleParser';
 import { parseSpec, type MechanicSpec } from '../src/rules/MechanicSpec';
 import { MechanicRegistry } from '../src/rules/MechanicRegistry';
 import { BUILTIN_SPECS, mechanicsWithoutSpec } from '../src/rules/builtinSpecs';
@@ -86,5 +86,16 @@ const a = worldWith(RED, WARP), b = worldWith(RED, WARP);
 const script = [DIRS[1], DIRS[1], DIRS[1], DIRS[0], null];
 for (const d of script) { a.step(d); b.step(d); }
 check('invented mechanics are deterministic', a.key() === b.key(), `${a.key()} vs ${b.key()}`);
+
+// Invented words land in a sentence, so a word typed in the third person
+// already must not be conjugated twice.
+check('a word already in the third person reads as typed',
+  conjugate('HELPS', 'GUARD') === 'HELPS' && conjugate('DIES', 'GUARD') === 'DIES',
+  `${conjugate('HELPS', 'GUARD')} / ${conjugate('DIES', 'GUARD')}`);
+check('sibilant stems still take -ES',
+  conjugate('PASS', 'GUARD') === 'PASSES' && conjugate('CHASE', 'GUARD') === 'CHASES',
+  `${conjugate('PASS', 'GUARD')} / ${conjugate('CHASE', 'GUARD')}`);
+check('YOU takes the bare verb',
+  conjugate('HELPS', 'YOU') === 'HELP' && conjugate('FLY', 'YOU') === 'FLY');
 
 process.exit(failed ? 1 : 0);
