@@ -1,6 +1,6 @@
 import { T, type LevelData, type Pos } from '../levels/LevelData';
 import type { Mechanic, Noun, RuleDefinition } from '../rules/RuleDefinition';
-import { bfsPath, DIRS, manhattan } from './Pathfinding';
+import { bfsPath, distanceMap, DIRS, manhattan } from './Pathfinding';
 
 // Deterministic, turn-based simulation. No Phaser in here so the solver in
 // tests/ can brute-force every level with every allowed word.
@@ -8,7 +8,7 @@ import { bfsPath, DIRS, manhattan } from './Pathfinding';
 // A turn: player acts (move / wait) -> tile effects -> doors -> win check
 //         -> guards act -> doors -> catch check.
 
-export interface GuardState { id: number; x: number; y: number }
+export interface GuardState { id: number; x: number; y: number; frozen: number }
 export interface KeyState { x: number; y: number; taken: boolean }
 export interface DoorState { x: number; y: number; open: boolean }
 
@@ -30,7 +30,9 @@ export type WorldEvent =
   | { type: 'death'; cause: 'red' | 'guard'; x: number; y: number }
   | { type: 'key'; x: number; y: number }
   | { type: 'door'; open: boolean; x: number; y: number }
-  | { type: 'guard'; id: number; x: number; y: number };
+  | { type: 'guard'; id: number; x: number; y: number }
+  | { type: 'guardDeath' | 'guardBounce'; id: number; x: number; y: number }
+  | { type: 'guardFreeze'; id: number; turns: number };
 
 export interface GuardIntent {
   verb: Mechanic;
@@ -51,7 +53,7 @@ export class World {
     let id = 0;
     return {
       player: { ...level.playerStart, hidden: false, frozen: 0 },
-      guards: level.entities.filter((e) => e.type === 'guard').map((e) => ({ id: id++, x: e.x, y: e.y })),
+      guards: level.entities.filter((e) => e.type === 'guard').map((e) => ({ id: id++, x: e.x, y: e.y, frozen: 0 })),
       keys: level.entities.filter((e) => e.type === 'key').map((e) => ({ x: e.x, y: e.y, taken: false })),
       doors: level.entities.filter((e) => e.type === 'door').map((e) => ({ x: e.x, y: e.y, open: false })),
       dead: false, deathCause: null, won: false, turn: 0,
@@ -65,14 +67,22 @@ export class World {
   /** Compact state hash for the solver. */
   key(): string {
     const s = this.s;
-    return `${s.player.x},${s.player.y},${s.player.frozen}|${s.guards.map((g) => g.x + ',' + g.y).join(';')}|${s.keys.map((k) => +k.taken).join('')}`;
+    return `${s.player.x},${s.player.y},${s.player.frozen}|${s.guards.map((g) => `${g.id}:${g.x},${g.y},${g.frozen}`).join(';')}|${s.keys.map((k) => +k.taken).join('')}`;
   }
 
+  /** The world obeys immediately: anyone standing on a tile that is now deadly dies right away. */
   setRules(rules: RuleDefinition[]) {
     this.rules = rules;
     const ev: WorldEvent[] = [];
+    if (this.s.dead || this.s.won) return ev;
+    const p = this.s.player;
+    if (isDeadly(this.verbOn('YOU', this.tile(p.x, p.y)))) return this.kill('red', ev);
+    for (const g of [...this.s.guards]) {
+      if (isDeadly(this.verbOn('GUARD', this.tile(g.x, g.y)))) this.killGuard(g, ev);
+    }
     this.updateHidden(ev);
     this.updateDoors(ev);
+    this.checkCaught(ev);
     return ev;
   }
 
@@ -86,13 +96,16 @@ export class World {
   guardAt(x: number, y: number) { return this.s.guards.find((g) => g.x === x && g.y === y); }
   keyAt(x: number, y: number) { return this.s.keys.find((k) => !k.taken && k.x === x && k.y === y); }
 
-  /** The verb that applies to YOU on the given tile (from "YOU <VERB> ON RED" style rules). */
-  youVerbOn(t: T): Mechanic | undefined {
+  /** What a tile does to YOU or a GUARD. A rule naming them directly beats an EVERYONE rule. */
+  verbOn(who: 'YOU' | 'GUARD', t: T): Mechanic | undefined {
     const cond = t === T.RED ? 'ON_RED' : t === T.BLUE ? 'ON_BLUE' : null;
     if (!cond) return undefined;
-    return this.rules.find((r) => r.subject === 'YOU' && r.condition === cond)?.verb;
+    return (this.rules.find((r) => r.subject === who && r.condition === cond) ??
+            this.rules.find((r) => r.subject === 'EVERYONE' && r.condition === cond))?.verb;
   }
-  guardRule() { return this.rules.find((r) => r.subject === 'GUARD'); }
+  youVerbOn(t: T) { return this.verbOn('YOU', t); }
+  /** The guard's behaviour rule ("GUARD CHASES YOU"), not tile rules like "GUARD DIES ON RED". */
+  guardRule() { return this.rules.find((r) => r.subject === 'GUARD' && !r.condition); }
 
   private isBlocking(x: number, y: number) {
     if (this.tile(x, y) === T.WALL) return true;
@@ -220,6 +233,29 @@ export class World {
     }
   }
 
+  private killGuard(g: GuardState, ev: WorldEvent[]) {
+    this.s.guards = this.s.guards.filter((o) => o !== g);
+    ev.push({ type: 'guardDeath', id: g.id, x: g.x, y: g.y });
+  }
+
+  /** Tile effects for a guard that just stepped in direction `dir`. */
+  private onGuardEnter(g: GuardState, dir: Pos, ev: WorldEvent[]) {
+    for (let hops = 0; hops < 8; hops++) {
+      const verb = this.verbOn('GUARD', this.tile(g.x, g.y));
+      if (isDeadly(verb)) { this.killGuard(g, ev); return; }
+      if (verb === 'FREEZE' || verb === 'SLEEP') {
+        g.frozen = verb === 'SLEEP' ? 3 : 2;
+        ev.push({ type: 'guardFreeze', id: g.id, turns: g.frozen });
+        return;
+      }
+      if (verb !== 'BOUNCE') return;
+      const nx = g.x + dir.x, ny = g.y + dir.y;
+      if (!this.guardPassable(g)(nx, ny)) return;
+      g.x = nx; g.y = ny;
+      ev.push({ type: 'guardBounce', id: g.id, x: nx, y: ny });
+    }
+  }
+
   private checkCaught(ev: WorldEvent[]) {
     const p = this.s.player;
     for (const g of this.s.guards) {
@@ -233,10 +269,12 @@ export class World {
 
   // ---------- guards ----------
 
+  /** Guards know the rules: they never walk onto a tile that would kill them. */
   private guardPassable(self: GuardState) {
     const p = this.s.player;
     return (x: number, y: number) =>
       !this.isBlocking(x, y) &&
+      !isDeadly(this.verbOn('GUARD', this.tile(x, y))) &&
       !(p.x === x && p.y === y) &&
       !this.s.guards.some((o) => o !== self && o.x === x && o.y === y);
   }
@@ -267,6 +305,7 @@ export class World {
     const verb: Mechanic = rule?.verb ?? 'SLEEP';
     const object = rule?.object;
     const idle: GuardIntent = { verb, lethal: false, path: [], target: null };
+    if (g.frozen > 0) return idle;
     const W = this.level.width, H = this.level.height;
     const pass = this.guardPassable(g);
     const hidden = this.s.player.hidden;
@@ -284,7 +323,7 @@ export class World {
             manhattan(g, prevPlayer) === 1 && pass(prevPlayer.x, prevPlayer.y)) {
           return { verb, lethal, path: [{ ...prevPlayer }], target: { ...prevPlayer } };
         }
-        const path = bfsPath(g, goal, pass, W, H);
+        const path = bfsPath(g, goal, pass, W, H) ?? (object === 'YOU' ? this.closestApproach(g, pass) : null);
         if (!path) return { ...idle, lethal };
         const target = path[path.length - 1];
         return { verb, lethal, path, target };
@@ -333,15 +372,35 @@ export class World {
     }
   }
 
+  /** Can't reach the player? Walk to the reachable tile nearest to them and lie in wait. */
+  private closestApproach(g: GuardState, pass: (x: number, y: number) => boolean): Pos[] | null {
+    const W = this.level.width, H = this.level.height, p = this.s.player;
+    const dist = distanceMap(g, pass, W, H);
+    let best = -1, bestScore = manhattan(g, p) * 1000;
+    for (let i = 0; i < dist.length; i++) {
+      if (dist[i] === Infinity) continue;
+      const score = manhattan({ x: i % W, y: (i / W) | 0 }, p) * 1000 + dist[i];
+      if (score < bestScore) { bestScore = score; best = i; }
+    }
+    if (best < 0) return null;
+    const bx = best % W, by = (best / W) | 0;
+    return bfsPath(g, (x, y) => x === bx && y === by, pass, W, H);
+  }
+
   private guardsAct(ev: WorldEvent[], prevPlayer: Pos) {
-    for (const g of this.s.guards) {
+    for (const g of [...this.s.guards]) {
+      if (g.frozen > 0) { g.frozen--; continue; }
       const intent = this.guardIntent(g, prevPlayer);
       if (!intent.path.length) continue;
       const next = intent.path[0];
       // Never step onto the player; lethal guards catch from an adjacent tile instead.
       if (next.x === this.s.player.x && next.y === this.s.player.y) continue;
+      const dir = { x: next.x - g.x, y: next.y - g.y };
       g.x = next.x; g.y = next.y;
       ev.push({ type: 'guard', id: g.id, x: g.x, y: g.y });
+      this.onGuardEnter(g, dir, ev);
     }
   }
 }
+
+const isDeadly = (v: Mechanic | undefined) => v === 'DIE' || v === 'ATTACK';

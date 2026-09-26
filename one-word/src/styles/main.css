@@ -281,3 +281,13 @@ body.in-menu #wordbook { display: none; }
 .wb-tip-meta { color: var(--dim); font-size: 10px; margin-top: 2px; }
 .wb-tip-meta:empty { display: none; }
 @media (max-width: 800px) { #wordbook { display: none; } }
+
+/* ---------- multi-rule levels ---------- */
+.rule.multi { font-size: clamp(16px, 2.4vw, 24px); }
+#rules:has(.rule.multi) { gap: 2px; }
+.word.editable.changed {
+  background: var(--accent);
+  color: #1a1400;
+  animation: none;
+}
+.word.editable.changed:hover { background: #ffdd88; }

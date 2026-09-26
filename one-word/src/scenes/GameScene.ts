@@ -44,7 +44,7 @@ const KEYMAP: Record<string, Pos> = {
   ArrowRight: { x: 1, y: 0 }, d: { x: 1, y: 0 }, D: { x: 1, y: 0 },
 };
 
-interface GuardView { box: Phaser.GameObjects.Container; body: Phaser.GameObjects.Arc; icon: Phaser.GameObjects.Text; lastVerb: string }
+interface GuardView { box: Phaser.GameObjects.Container; body: Phaser.GameObjects.Arc; icon: Phaser.GameObjects.Text; lastVerb: string; dying?: boolean }
 
 export class GameScene extends Phaser.Scene {
   private levelIndex = 0;
@@ -52,9 +52,11 @@ export class GameScene extends Phaser.Scene {
   private world!: World;
   private rules!: RuleManager;
 
+  /** Tile size for this level (shrinks for big maps so they fit the canvas). */
+  private ts = TILE;
   private ox = 0;
   private oy = 0;
-  private glyphs: { t: Phaser.GameObjects.Text; tile: T }[] = [];
+  private glyphs: { t: Phaser.GameObjects.Text; g: Phaser.GameObjects.Text; tile: T }[] = [];
   private plates: { r: Phaser.GameObjects.Rectangle; x: number; y: number }[] = [];
   private doors: Phaser.GameObjects.Container[] = [];
   private keys: Phaser.GameObjects.Container[] = [];
@@ -75,6 +77,8 @@ export class GameScene extends Phaser.Scene {
   private finished = false;
   /** The word currently written into the rule; unlocked in the word book if it solves the level. */
   private activeWord: { word: string; token: string; ai: boolean } | null = null;
+  /** Slot last opened/rewritten — the word book fills this one. */
+  private lastSlot = -1;
   private onKey = (e: KeyboardEvent) => this.handleKey(e);
 
   constructor() { super('game'); }
@@ -85,6 +89,7 @@ export class GameScene extends Phaser.Scene {
     this.glyphs = []; this.plates = []; this.doors = []; this.keys = []; this.guards.clear(); this.debugText = [];
     this.locked = false; this.finished = false;
     this.wordsTried = 0; this.deaths = 0;
+    this.activeWord = null; this.lastSlot = -1;
   }
 
   create() {
@@ -100,8 +105,9 @@ export class GameScene extends Phaser.Scene {
     this.world = new World(this.level, this.rules.rules);
 
     const { width: W, height: H } = this.scale;
-    this.ox = Math.round((W - this.level.width * TILE) / 2);
-    this.oy = Math.round((H - this.level.height * TILE) / 2);
+    this.ts = Math.min(TILE, Math.floor(W / this.level.width), Math.floor((H - 8) / this.level.height));
+    this.ox = Math.round((W - this.level.width * this.ts) / 2);
+    this.oy = Math.round((H - this.level.height * this.ts) / 2);
 
     this.drawTiles();
     this.overlay = this.add.graphics().setDepth(2);
@@ -110,10 +116,13 @@ export class GameScene extends Phaser.Scene {
     this.aiNote = this.add.text(W / 2, H - 8, '', { fontFamily: FONT, fontSize: '13px', color: '#8a85a0' }).setOrigin(0.5, 1).setDepth(40);
 
     // Bind DOM UI to this level.
-    editor.onSubmit = (raw) => this.submitWord(raw);
-    editor.onOpen = () => { if (this.level.tutorial && !session.tutorialDone) editor.setTutorial('type'); };
-    editor.render(this.rules.rules, this.rules.editableIndex);
-    wordbook.onPick = (w) => editor.open(w);
+    editor.onSubmit = (raw, slot) => this.submitWord(raw, slot);
+    editor.onOpen = () => {
+      this.lastSlot = editor.slot;
+      if (this.level.tutorial && !session.tutorialDone) editor.setTutorial('type');
+    };
+    editor.render(this.rules.rules, this.rules.slots);
+    wordbook.onPick = (w) => editor.open(this.lastSlot >= 0 ? this.lastSlot : this.rules.slots[0], w);
     wordbook.render();
     editor.setTutorial(this.level.tutorial && !session.tutorialDone ? 'click' : null);
     document.getElementById('level-name')!.textContent = `LEVEL ${this.level.id} · ${this.level.name}`;
@@ -127,6 +136,7 @@ export class GameScene extends Phaser.Scene {
     this.updateStats();
     this.sync(false);
     this.cameras.main.fadeIn(250, 20, 18, 28);
+    if (this.level.intro) this.showIntro(this.level.intro);
   }
 
   update() {
@@ -135,8 +145,8 @@ export class GameScene extends Phaser.Scene {
 
   // ---------------- drawing ----------------
 
-  private px(x: number) { return this.ox + x * TILE + TILE / 2; }
-  private py(y: number) { return this.oy + y * TILE + TILE / 2; }
+  private px(x: number) { return this.ox + x * this.ts + this.ts / 2; }
+  private py(y: number) { return this.oy + y * this.ts + this.ts / 2; }
 
   private drawTiles() {
     const g = this.add.graphics().setDepth(0);
@@ -144,28 +154,30 @@ export class GameScene extends Phaser.Scene {
     for (let y = 0; y < L.height; y++) {
       for (let x = 0; x < L.width; x++) {
         const t = L.tiles[y][x];
-        const X = this.ox + x * TILE, Y = this.oy + y * TILE;
+        const X = this.ox + x * this.ts, Y = this.oy + y * this.ts;
         if (t === T.WALL) {
-          g.fillStyle(COLORS.wall).fillRect(X, Y, TILE, TILE);
-          g.fillStyle(COLORS.wallTop).fillRect(X, Y, TILE, 6);
+          g.fillStyle(COLORS.wall).fillRect(X, Y, this.ts, this.ts);
+          g.fillStyle(COLORS.wallTop).fillRect(X, Y, this.ts, 6);
           continue;
         }
-        g.fillStyle((x + y) % 2 ? COLORS.floor : COLORS.floorAlt).fillRoundedRect(X + 2, Y + 2, TILE - 4, TILE - 4, 6);
+        g.fillStyle((x + y) % 2 ? COLORS.floor : COLORS.floorAlt).fillRoundedRect(X + 2, Y + 2, this.ts - 4, this.ts - 4, 6);
         if (t === T.RED || t === T.BLUE) {
           const c = t === T.RED ? COLORS.red : COLORS.blue;
-          g.fillStyle(c).fillRoundedRect(X + 3, Y + 3, TILE - 6, TILE - 6, 7);
-          g.fillStyle(0x000000, 0.14).fillRoundedRect(X + 11, Y + 11, TILE - 22, TILE - 22, 5);
-          const txt = this.add.text(X + TILE / 2, Y + TILE / 2, '', { fontFamily: FONT, fontSize: '22px', fontStyle: 'bold', color: '#ffffff' })
+          g.fillStyle(c).fillRoundedRect(X + 3, Y + 3, this.ts - 6, this.ts - 6, 7);
+          g.fillStyle(0x000000, 0.14).fillRoundedRect(X + 11, Y + 11, this.ts - 22, this.ts - 22, 5);
+          const txt = this.add.text(X + this.ts / 2, Y + this.ts / 2, '', { fontFamily: FONT, fontSize: '22px', fontStyle: 'bold', color: '#ffffff' })
             .setOrigin(0.5).setAlpha(0.55).setDepth(1);
-          this.glyphs.push({ t: txt, tile: t });
+          const gtxt = this.add.text(X + this.ts - 7, Y + 5, '', { fontFamily: FONT, fontSize: '13px', fontStyle: 'bold', color: '#ffb27a', stroke: '#14121c', strokeThickness: 3 })
+            .setOrigin(1, 0).setDepth(1);
+          this.glyphs.push({ t: txt, g: gtxt, tile: t });
         } else if (t === T.EXIT) {
-          g.fillStyle(COLORS.exit, 0.22).fillRoundedRect(X + 3, Y + 3, TILE - 6, TILE - 6, 7);
-          const glow = this.add.rectangle(X + TILE / 2, Y + TILE / 2, TILE - 16, TILE - 16, COLORS.exit).setDepth(1);
+          g.fillStyle(COLORS.exit, 0.22).fillRoundedRect(X + 3, Y + 3, this.ts - 6, this.ts - 6, 7);
+          const glow = this.add.rectangle(X + this.ts / 2, Y + this.ts / 2, this.ts - 16, this.ts - 16, COLORS.exit).setDepth(1);
           this.tweens.add({ targets: glow, scale: 0.7, alpha: 0.55, duration: 800, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
-          this.add.text(X + TILE / 2, Y + TILE / 2, 'EXIT', { fontFamily: FONT, fontSize: '11px', fontStyle: 'bold', color: '#0b2a1c' }).setOrigin(0.5).setDepth(1);
+          this.add.text(X + this.ts / 2, Y + this.ts / 2, 'EXIT', { fontFamily: FONT, fontSize: '11px', fontStyle: 'bold', color: '#0b2a1c' }).setOrigin(0.5).setDepth(1);
         } else if (t === T.PLATE) {
-          g.fillStyle(0x000000, 0.3).fillRoundedRect(X + 8, Y + 8, TILE - 16, TILE - 16, 5);
-          const r = this.add.rectangle(X + TILE / 2, Y + TILE / 2 - 2, TILE - 18, TILE - 18, COLORS.plate).setDepth(1);
+          g.fillStyle(0x000000, 0.3).fillRoundedRect(X + 8, Y + 8, this.ts - 16, this.ts - 16, 5);
+          const r = this.add.rectangle(X + this.ts / 2, Y + this.ts / 2 - 2, this.ts - 18, this.ts - 18, COLORS.plate).setDepth(1);
           this.plates.push({ r, x, y });
         }
       }
@@ -175,7 +187,7 @@ export class GameScene extends Phaser.Scene {
   private createEntities() {
     for (const d of this.world.s.doors) {
       const c = this.add.container(this.px(d.x), this.py(d.y)).setDepth(3);
-      const body = this.add.rectangle(0, 0, TILE - 6, TILE - 6, COLORS.door).setStrokeStyle(3, 0xb79cff);
+      const body = this.add.rectangle(0, 0, this.ts - 6, this.ts - 6, COLORS.door).setStrokeStyle(3, 0xb79cff);
       const bars = this.add.graphics();
       bars.lineStyle(3, 0x5b36c9);
       for (const bx of [-12, 0, 12]) bars.lineBetween(bx, -18, bx, 18);
@@ -239,8 +251,11 @@ export class GameScene extends Phaser.Scene {
 
     // Tiles reflect what the rules currently say they do.
     for (const gl of this.glyphs) {
-      const verb = this.world.youVerbOn(gl.tile);
+      const verb = this.world.verbOn('YOU', gl.tile);
+      const gverb = this.world.verbOn('GUARD', gl.tile);
       gl.t.setText(verb ? TILE_GLYPH[verb] ?? '' : '');
+      // Small guard-coloured glyph when the tile treats guards differently.
+      gl.g.setText(gverb && gverb !== verb ? TILE_GLYPH[gverb] ?? '' : '');
     }
     for (const pl of this.plates) {
       const down = (s.player.x === pl.x && s.player.y === pl.y) || !!this.world.guardAt(pl.x, pl.y);
@@ -252,13 +267,21 @@ export class GameScene extends Phaser.Scene {
     });
     s.keys.forEach((k, i) => { if (k.taken) this.keys[i].setVisible(false); });
 
-    // Guards.
+    // Guards (dead ones vanish).
+    for (const [id, v] of this.guards) {
+      if (!s.guards.some((g) => g.id === id) && v.box.visible && !v.dying) this.poofGuard(id);
+    }
     for (const g of s.guards) {
       const v = this.guards.get(g.id)!;
       const intent = this.world.guardIntent(g);
       const st = guardStyle(intent.verb);
-      v.body.setFillStyle(st.color);
-      v.icon.setText(intent.lethal || intent.verb !== 'CHASE' ? st.icon : '·');
+      if (g.frozen > 0) {
+        v.body.setFillStyle(COLORS.ice);
+        v.icon.setText(`❄${g.frozen}`);
+      } else {
+        v.body.setFillStyle(st.color);
+        v.icon.setText(intent.lethal || intent.verb !== 'CHASE' ? st.icon : '·');
+      }
       v.box.setAlpha(intent.verb === 'SLEEP' ? 0.75 : 1);
       if (animate) this.tweens.add({ targets: v.box, x: this.px(g.x), y: this.py(g.y), duration: 130, ease: 'Quad.easeOut' });
       else v.box.setPosition(this.px(g.x), this.py(g.y));
@@ -282,7 +305,7 @@ export class GameScene extends Phaser.Scene {
         for (const d of [{ x: 0, y: 0 }, { x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 }]) {
           const x = g.x + d.x, y = g.y + d.y;
           if (this.world.tile(x, y) === T.WALL) continue;
-          o.fillStyle(0xff3d3d, 0.13).fillRoundedRect(this.ox + x * TILE + 3, this.oy + y * TILE + 3, TILE - 6, TILE - 6, 7);
+          o.fillStyle(0xff3d3d, 0.13).fillRoundedRect(this.ox + x * this.ts + 3, this.oy + y * this.ts + 3, this.ts - 6, this.ts - 6, 7);
         }
       }
       const st = guardStyle(intent.verb);
@@ -290,7 +313,7 @@ export class GameScene extends Phaser.Scene {
         o.fillStyle(st.color, 0.55 - i * 0.05).fillCircle(this.px(p.x), this.py(p.y), 4);
       });
       if (intent.target && intent.path.length) {
-        o.lineStyle(2, st.color, 0.5).strokeRoundedRect(this.ox + intent.target.x * TILE + 6, this.oy + intent.target.y * TILE + 6, TILE - 12, TILE - 12, 6);
+        o.lineStyle(2, st.color, 0.5).strokeRoundedRect(this.ox + intent.target.x * this.ts + 6, this.oy + intent.target.y * this.ts + 6, this.ts - 12, this.ts - 12, 6);
       }
     }
   }
@@ -302,7 +325,7 @@ export class GameScene extends Phaser.Scene {
     if (!this.debug) return;
     const L = this.level;
     for (let y = 0; y < L.height; y++) for (let x = 0; x < L.width; x++) {
-      this.debugText.push(this.add.text(this.ox + x * TILE + 3, this.oy + y * TILE + 2, `${x},${y}`, { fontFamily: FONT, fontSize: '9px', color: '#ffffff' }).setAlpha(0.45).setDepth(50));
+      this.debugText.push(this.add.text(this.ox + x * this.ts + 3, this.oy + y * this.ts + 2, `${x},${y}`, { fontFamily: FONT, fontSize: '9px', color: '#ffffff' }).setAlpha(0.45).setDepth(50));
     }
     for (const g of this.world.s.guards) {
       const intent = this.world.guardIntent(g);
@@ -327,7 +350,7 @@ export class GameScene extends Phaser.Scene {
     if (e.key === '`') { this.debug = !this.debug; this.drawDebug(); return; }
     if (e.key === 'r' || e.key === 'R') { e.preventDefault(); this.restart(); return; }
     if (e.key === 'Escape') { this.toMenu(); return; }
-    if (e.key === 'Enter' || e.key === 'e' || e.key === 'E') { e.preventDefault(); editor.open(); return; }
+    if (e.key === 'Enter' || e.key === 'e' || e.key === 'E') { e.preventDefault(); editor.open(this.lastSlot >= 0 ? this.lastSlot : this.rules.slots[0]); return; }
     const dir = KEYMAP[e.key];
     if (dir || e.key === ' ') {
       e.preventDefault();
@@ -364,9 +387,33 @@ export class GameScene extends Phaser.Scene {
         case 'freeze': sfx.freeze(); this.burst(this.world.s.player.x, this.world.s.player.y, COLORS.ice, 10); break;
         case 'key': sfx.key(); this.burst(e.x, e.y, COLORS.key, 16); this.floatText(e, 'UNLOCKED!', '#ffd166'); break;
         case 'door': sfx.door(); this.burst(e.x, e.y, COLORS.door, e.open ? 10 : 4); break;
+        case 'guardDeath': this.poofGuard(e.id); break;
+        case 'guardBounce': sfx.bounce(); this.burst(e.x, e.y, COLORS.red, 6); break;
+        case 'guardFreeze': sfx.freeze(); { const g = this.world.s.guards.find((o) => o.id === e.id); if (g) this.burst(g.x, g.y, COLORS.ice, 10); } break;
         case 'wait': break;
       }
     }
+  }
+
+  /** A guard was destroyed: particles, a puff and gone. */
+  private poofGuard(id: number) {
+    const v = this.guards.get(id);
+    if (!v || v.dying || !v.box.visible) return;
+    v.dying = true;
+    sfx.death();
+    const tx = (v.box.x - this.ox - this.ts / 2) / this.ts, ty = (v.box.y - this.oy - this.ts / 2) / this.ts;
+    this.burst(tx, ty, COLORS.guard, 22);
+    this.floatText({ x: tx, y: ty }, 'GONE', '#ff8c42');
+    this.tweens.killTweensOf(v.box);
+    this.tweens.add({ targets: v.box, scale: 1.6, alpha: 0, angle: -40, duration: 380, ease: 'Quad.easeOut', onComplete: () => v.box.setVisible(false) });
+  }
+
+  private showIntro(text: string) {
+    const { width: W } = this.scale;
+    const t = this.add.text(W / 2, 14, text, { fontFamily: FONT, fontSize: '16px', fontStyle: 'bold', color: '#ffd166', backgroundColor: '#14121cdd', padding: { x: 10, y: 4 } })
+      .setOrigin(0.5, 0).setDepth(45).setAlpha(0);
+    this.tweens.add({ targets: t, alpha: 1, y: t.y + 6, duration: 400, ease: 'Quad.easeOut' });
+    this.tweens.add({ targets: t, alpha: 0, delay: 4200, duration: 800, onComplete: () => t.destroy() });
   }
 
   private burst(tx: number, ty: number, color: number, n: number, up = false) {
@@ -402,7 +449,7 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.flash(160, 229, 72, 77);
     this.burst(s.player.x, s.player.y, COLORS.red, 26);
     this.tweens.add({ targets: this.player, scale: 1.4, alpha: 0, angle: 30, duration: 320 });
-    this.toast(s.deathCause === 'red' ? `YOU ${ruleTokens(this.rules.rules.find((r) => r.subject === 'YOU')!)[1].text} ON RED` : 'CAUGHT!');
+    this.toast(s.deathCause === 'red' ? 'YOU DIED ON RED' : 'CAUGHT!');
     this.time.delayedCall(850, () => this.resetWorld(false));
   }
 
@@ -419,12 +466,18 @@ export class GameScene extends Phaser.Scene {
     if (fullReset) {
       this.activeWord = null;
       this.rules.reset();
-      editor.render(this.rules.rules, this.rules.editableIndex);
+      editor.render(this.rules.rules, this.rules.slots);
     }
     this.world = new World(this.level, this.rules.rules);
     this.tweens.killTweensOf(this.player);
     this.player.setScale(1).setAngle(0).setAlpha(1);
     this.keys.forEach((k) => k.setVisible(true));
+    for (const [id, v] of this.guards) {
+      const g = this.world.s.guards.find((o) => o.id === id)!;
+      this.tweens.killTweensOf(v.box);
+      v.dying = false;
+      v.box.setVisible(true).setScale(1).setAngle(0).setAlpha(1).setPosition(this.px(g.x), this.py(g.y));
+    }
     this.locked = false;
     this.finished = false;
     this.sync(false);
@@ -454,11 +507,12 @@ export class GameScene extends Phaser.Scene {
 
   // ---------------- the rewrite ----------------
 
-  private async submitWord(raw: string) {
+  private async submitWord(raw: string, slot: number) {
     if (!raw.trim()) return { ok: false as const, message: 'TYPE A WORD.' };
     this.wordsTried++;
     this.updateStats();
-    const res = await this.rules.interpret(raw);
+    if (this.finished || this.world.s.dead) return { ok: false as const, message: 'NOT NOW.' };
+    const res = await this.rules.interpret(raw, slot);
     const early = this.levelIndex < 2 && this.level.hintWords;
     const hint = early ? `Try words like: ${this.level.hintWords!.join(', ')}` : undefined;
     if (!res.ok) {
@@ -469,14 +523,21 @@ export class GameScene extends Phaser.Scene {
         default: return { ok: false as const, message: "THE WORLD DOESN'T UNDERSTAND THAT WORD.", hint };
       }
     }
-    if (res.token === this.rules.currentToken) {
+    if (res.token === this.rules.tokenAt(slot)) {
       return { ok: false as const, message: "THAT'S ALREADY THE RULE." };
     }
+    // ONE WORD: rewriting this slot restores any other rewritten slot.
+    const before = this.rules.changedSlot;
     this.activeWord = { word: normalizeWord(raw) ?? raw.trim(), token: res.token, ai: res.source === 'ai' };
-    this.rules.apply(res.token);
-    this.world.setRules(this.rules.rules);
-    void editor.playRewrite(this.rules.rules, this.rules.editableIndex);
+    this.lastSlot = slot;
+    this.rules.apply(slot, res.token);
+    const affected = before >= 0 && before !== slot ? [slot, before] : [slot];
+    void editor.playRewrite(this.rules.rules, this.rules.slots, this.rules.changedSlot, affected);
+    const ev = this.world.setRules(this.rules.rules);
     this.playRewriteFx();
+    this.effects(ev);
+    this.sync(true);
+    if (this.world.s.dead) this.time.delayedCall(250, () => this.onDeath());
     if (res.source === 'ai') {
       this.aiNote.setText(`AI understood "${raw.trim().toLowerCase()}" as ${res.token}${res.note ? ` — ${res.note}` : ''}`).setAlpha(1);
       this.tweens.add({ targets: this.aiNote, alpha: 0.6, delay: 3000, duration: 800 });
@@ -501,6 +562,7 @@ export class GameScene extends Phaser.Scene {
     }
     for (const g of this.world.s.guards) {
       const v = this.guards.get(g.id)!;
+      if (v.dying) continue;
       this.tweens.add({ targets: v.box, scale: { from: 1.35, to: 1 }, duration: 380, ease: 'Back.easeOut' });
       this.burst(g.x, g.y, guardStyle(this.world.guardIntent(g).verb).color, 14);
     }
@@ -512,7 +574,7 @@ export class GameScene extends Phaser.Scene {
   // ---------------- level complete ----------------
 
   private showComplete() {
-    const token = this.rules.currentToken;
+    const token = this.rules.solutionToken();
     const found = foundFor(this.level.id);
     const isNew = !found.has(token);
     found.add(token);
