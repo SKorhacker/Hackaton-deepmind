@@ -1,4 +1,4 @@
-// Dynamic mechanics: words nobody hardcoded.
+// Creative mode: words nobody hardcoded.
 //
 // Two things have to hold for the prototype to be honest:
 //   1. a model's answer is data, and bad data degrades instead of breaking;

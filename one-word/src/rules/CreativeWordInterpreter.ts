@@ -3,7 +3,7 @@ import { parseSpec, SPEC_JSON_SCHEMA, type MechanicSpec } from './MechanicSpec';
 import { registry as sharedRegistry, type MechanicRegistry } from './MechanicRegistry';
 import type { InterpretContext } from './WordInterpreter';
 
-// The dynamic half of the game: instead of picking one of twelve verbs, the
+// The creative half of the game: instead of picking one of twelve verbs, the
 // model *invents* the verb. It answers with a `MechanicSpec` — pure data,
 // clamped and validated here before the simulation ever sees it. Nothing is
 // compiled, nothing is evaluated: an implausible answer becomes a boring tile
@@ -27,7 +27,7 @@ const SYSTEM = [
   'tile and motion as null.',
 ].join(' ');
 
-export class DynamicWordInterpreter {
+export class CreativeWordInterpreter {
   lastNote = '';
 
   constructor(
@@ -68,7 +68,7 @@ export class DynamicWordInterpreter {
         ? await this.askGemini(prompt, ctrl.signal)
         : await this.askOpenAI(prompt, ctrl.signal);
       if (!res.ok) {
-        console.warn('dynamic interpreter HTTP', res.status, await res.text().catch(() => ''));
+        console.warn('creative interpreter HTTP', res.status, await res.text().catch(() => ''));
         return null;
       }
       const raw = JSON.parse(await this.textOf(res));
@@ -79,7 +79,7 @@ export class DynamicWordInterpreter {
       const spec = parseSpec(token, raw);
       return spec ? { ...spec, dynamic: true } : null;
     } catch (e) {
-      console.warn('dynamic interpreter failed', e);
+      console.warn('creative interpreter failed', e);
       return null;
     } finally {
       clearTimeout(timer);

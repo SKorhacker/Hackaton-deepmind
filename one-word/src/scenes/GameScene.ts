@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { COLORS, DEBUG_MODE, TILE, aiProvider, dynamicMode } from '../config/GameConfig';
+import { COLORS, DEBUG_MODE, TILE, aiProvider, creativeMode } from '../config/GameConfig';
 import { LEVELS } from '../levels/levels';
 import { T, type LevelData, type Pos } from '../levels/LevelData';
 import type { Mechanic } from '../rules/RuleDefinition';
@@ -9,7 +9,7 @@ import { ruleTokens } from '../rules/RuleParser';
 import { RuleManager } from '../rules/RuleManager';
 import { normalizeWord } from '../rules/WordInterpreter';
 import { createInterpreter } from '../rules/createInterpreter';
-import { DynamicWordInterpreter } from '../rules/DynamicWordInterpreter';
+import { CreativeWordInterpreter } from '../rules/CreativeWordInterpreter';
 import { comboKey } from '../systems/Solver';
 import { World, type WorldEvent } from '../systems/World';
 import { RuleEditor } from '../ui/RuleEditor';
@@ -125,7 +125,7 @@ export class GameScene extends Phaser.Scene {
       this.level.rules,
       createInterpreter(),
       this.level.maxChanges ?? 1,
-      ai && dynamicMode() ? new DynamicWordInterpreter(ai) : null,
+      ai && creativeMode() ? new CreativeWordInterpreter(ai) : null,
     );
     this.world = new World(this.level, this.rules.rules);
 

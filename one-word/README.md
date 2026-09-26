@@ -26,10 +26,10 @@ Controls: **WASD / arrows** move · **Space** wait · **Enter / E** edit the wor
 
 The game is fully playable without AI.
 
-### Dynamic mode (invented mechanics)
+### Creative mode (invented mechanics)
 
 The title screen offers two modes next to **PLAY**: **NORMAL** (the twelve shipped mechanics, works with AI off)
-and **DYNAMIC**, which needs an AI key. In dynamic mode verb slots stop being a menu and the dictionary is
+and **CREATIVE**, which needs an AI key. In creative mode verb slots stop being a menu and the dictionary is
 skipped entirely — `vanish` no longer collapses onto `HIDE`, it becomes `VANISH` with a meaning of its own:
 the model answers with a *mechanic spec* — data describing what a tile does and how an actor moves —
 and the simulation runs it. `warp`, `melt`, `ghost` and `shadow` become real laws of the world although nobody
@@ -83,7 +83,7 @@ deadly dies), so *when* you change a word matters. For these levels `npm test` c
 start works, and that a solution rewriting words mid-level exists.
 
 `npm test` checks this table by exhaustive search over every allowed word (within `maxChanges`), then checks
-that invented mechanics behave (`tests/dynamic.test.ts`).
+that invented mechanics behave (`tests/creative.test.ts`).
 
 ### Add your own
 

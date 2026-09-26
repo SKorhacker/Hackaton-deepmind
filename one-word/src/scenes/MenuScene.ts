@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { COLORS, aiProvider, dynamicMode, setAIKey, setDynamicMode } from '../config/GameConfig';
+import { COLORS, aiProvider, creativeMode, setAIKey, setCreativeMode } from '../config/GameConfig';
 import { LEVELS } from '../levels/levels';
 import { session } from '../config/Session';
 
@@ -28,15 +28,15 @@ export class MenuScene extends Phaser.Scene {
     // or with every typed word invented on the spot.
     const modeY = H * 0.41;
     const normal = this.modeButton(W / 2 - 61, modeY, 'NORMAL', () => this.setMode(false));
-    const dynamicBtn = this.modeButton(W / 2 + 61, modeY, 'DYNAMIC', () => this.setMode(true));
+    const creativeBtn = this.modeButton(W / 2 + 61, modeY, 'CREATIVE', () => this.setMode(true));
     const caption = this.add.text(W / 2, modeY + 34, '', { fontFamily: FONT, fontSize: '12px', color: '#5d5873', align: 'center' }).setOrigin(0.5);
     const refreshMode = () => {
-      const on = dynamicMode() && !!aiProvider();
+      const on = creativeMode() && !!aiProvider();
       normal.select(!on);
-      dynamicBtn.select(on);
+      creativeBtn.select(on);
       caption.setText(
         on ? 'any word you type becomes a new law of the world'
-        : !aiProvider() ? 'the twelve built-in mechanics · DYNAMIC needs an AI key'
+        : !aiProvider() ? 'the twelve built-in mechanics · CREATIVE needs an AI key'
         : 'the twelve built-in mechanics',
       );
     };
@@ -77,10 +77,10 @@ export class MenuScene extends Phaser.Scene {
   private refreshMode: () => void = () => {};
   private askForKey: () => void = () => {};
 
-  /** Dynamic mode needs a key, so choosing it without one asks for the key first. */
-  private setMode(dynamic: boolean) {
-    if (dynamic && !aiProvider()) { this.askForKey(); if (!aiProvider()) return; }
-    setDynamicMode(dynamic);
+  /** Creative mode needs a key, so choosing it without one asks for the key first. */
+  private setMode(creative: boolean) {
+    if (creative && !aiProvider()) { this.askForKey(); if (!aiProvider()) return; }
+    setCreativeMode(creative);
     this.refreshMode();
   }
 
