@@ -23,6 +23,7 @@ async function boot() {
     scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
     scene: [MenuScene, GameScene],
     render: { antialias: true },
+    audio: { noAudio: true }, // all sound goes through our own AudioContext in ui/Audio.ts
   });
   if (import.meta.env.DEV) (window as unknown as { __game: Phaser.Game }).__game = game;
 }

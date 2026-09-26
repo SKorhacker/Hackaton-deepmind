@@ -413,6 +413,7 @@ export class GameScene extends Phaser.Scene {
     if (fullReset) {
       this.rules.reset();
       editor.render(this.rules.rules, this.rules.editableIndex);
+      this.updateMusic();
     }
     this.world = new World(this.level, this.rules.rules);
     this.tweens.killTweensOf(this.player);
