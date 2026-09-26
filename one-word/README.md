@@ -33,6 +33,32 @@ landscape phones and desktop all work without a separate mobile version.
 
 The game is fully playable without AI.
 
+### Creative mode (invented mechanics)
+
+The title screen offers two modes next to **PLAY**: **NORMAL** (the twelve shipped mechanics, works with AI off)
+and **CREATIVE**, which needs an AI key. In creative mode verb slots stop being a menu and the dictionary is
+skipped entirely — `vanish` no longer collapses onto `HIDE`, it becomes `VANISH` with a meaning of its own:
+the model answers with a *mechanic spec* — data describing what a tile does and how an actor moves —
+and the simulation runs it. `warp`, `melt`, `ghost` and `shadow` become real laws of the world although nobody
+implemented them.
+
+The spec is the safety boundary. A mechanic is:
+
+```ts
+{ tile:   { onEnter: [{ do: 'teleport', target: 'EXIT' }], status: ['phasing'] },
+  motion: { mode: 'trail', target: 'OBJECT', lethal: false, steps: 2 } }
+```
+
+`do` is one of nine verbs the engine implements (`die`, `kill`, `freeze`, `push`, `teleport`, `swap`, `unlock`,
+`heal`, `nothing`), `mode` one of four ways to move. Model output is parsed by `parseSpec`, which drops unknown
+fields, clamps numbers, caps action lists and refuses specs that say nothing at all — so a hallucination becomes
+a dull tile, never a crash. Nothing is compiled and nothing is evaluated: no `eval`, no generated code, and a
+typed word can never redefine a mechanic the game ships with. Each accepted word is cached for the session, so
+the world keeps its mind and stays deterministic enough for the solver.
+
+The twelve original mechanics are written in the same DSL (`src/rules/builtinSpecs.ts`) and get no privileges:
+`npm test` still proves the shipped levels have exactly the documented solutions, through the spec interpreter.
+
 ### AI keys
 
 - **Dev:** `cp .env.example .env.local` and set `VITE_GEMINI_API_KEY` ([Google AI Studio](https://aistudio.google.com/apikey))
@@ -88,7 +114,8 @@ sentences at a time. Rewriting another word restores the first. A level can rais
 deadly dies), so *when* you change a word matters. For these levels `npm test` checks that no word typed at the
 start works, and that a solution rewriting words mid-level exists.
 
-`npm test` checks this table by exhaustive search over every allowed word (within `maxChanges`).
+`npm test` checks this table by exhaustive search over every allowed word (within `maxChanges`), then checks
+that invented mechanics behave (`tests/creative.test.ts`).
 
 ### Add your own
 
@@ -114,7 +141,8 @@ See `src/levels/definitions/README.md` for the level format, the map legend and 
 
 ## Structure
 
-- `src/systems/World.ts`: deterministic turn-based simulation (no Phaser), rules → behavior
+- `src/systems/World.ts`: deterministic turn-based simulation (no Phaser), specs → behavior
+- `src/rules/MechanicSpec.ts`: the mechanic DSL, its validator and the JSON schema the model answers with
 - `src/rules/`: rule types, sentence rendering, interpreters, `RuleManager`
 - `src/levels/definitions/`: one file per level (auto-discovered, ordered by file number)
 - `src/levels/levels.ts`: level discovery; `defineLevel.ts` / `registry.ts`: level format and loading
