@@ -24,10 +24,11 @@ try {
  await word(p,'bounce');check(await p.locator('.wb-word').count()===0,'Word unlocked before completion');
  await p.locator('#btn-restart').click();await word(p,'hide');
  const kinds=[];
- for(let i=0;i<8;i++) {
+ for(let i=0;i<12;i++) {
   if(i!==0)await enter(p,i);
   if(i>0&&i<5)await word(p,['','sleep','help','key','help'][i]);
   if(i===5){await word(p,'sleep',0);await word(p,'guard',1);check(await p.evaluate(()=>{const r=window.__game.scene.getScene('game').rules;return r.tokenAt(0)==='CHASE'&&r.tokenAt(1)==='GUARD';}),'One-word limit did not restore previous slot');await p.locator('#btn-restart').click();}
+  if(i>=8)await word(p,['slide','teleport','push','swap'][i-8]);
   if(i===7){await word(p,'hide');await word(p,'help',1);check(await p.evaluate(()=>window.__game.scene.getScene('game').rules.changedSlots.length===2),'Two-word exception failed');}
   if(i>0&&i<4)kinds.push(await p.evaluate(()=>[...window.__game.scene.getScene('game').guards.values()][0].sprite.texture.key));
   if(i===5||i===6){
@@ -51,9 +52,10 @@ try {
  for(const [w,f] of [['sleep',1],['help',2],['freeze',3],['chase',0]]){await word(p,w);check(await p.evaluate(f=>[...window.__game.scene.getScene('game').guards.values()].every(v=>v.sprite.frame.name===f),f),`Missing enemy state ${w}`);}
  check(await p.locator('.wb-word[data-token="HELP"]').count()>0,'Usable word missing from chapter book');check(await p.locator('.wb-word[data-token="KEY"]').count()===0,'Unusable word shown in chapter book');
  await p.locator('.wb-word[data-token="HELP"]').first().click();check(await p.locator('#editor-input').inputValue()==='help','Word book did not prefill');await p.keyboard.press('Escape');
- await p.reload();await p.waitForFunction(()=>window.__game?.scene.isActive('menu'));check(await p.evaluate(()=>JSON.parse(localStorage.getItem('oneword_progress_v1')).length===8),'Progress did not survive reload');
+ await p.reload();await p.waitForFunction(()=>window.__game?.scene.isActive('menu'));check(await p.evaluate(()=>JSON.parse(localStorage.getItem('oneword_progress_v1')).length===12),'Progress did not survive reload');
  await p.keyboard.press('Enter');await ready(p);check(await p.locator('.wb-word[data-token="HIDE"]').count()>0,'Word list did not survive reload');
  results.push('Enemy states, chapter-filtered word book, click-to-reuse and reload persistence');
+ await p.close();
  const m=await browser.newPage({viewport:{width:390,height:844},deviceScaleFactor:2,isMobile:true,hasTouch:true});attach(m);await m.goto(base);await m.locator('#rotate-screen').waitFor({state:'visible'});
  check(await m.locator('#app').evaluate(e=>e.inert),'Portrait game is not inert');
  await m.setViewportSize({width:844,height:390});await m.locator('#mobile-begin').waitFor({state:'visible'});

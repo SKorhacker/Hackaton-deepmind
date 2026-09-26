@@ -15,7 +15,8 @@ try{
  const p=await browser.newPage({viewport:{width:1000,height:760}});attach(p); const m=await browser.newPage({viewport:{width:320,height:568},isMobile:true,hasTouch:true});attach(m);
  // Level maker: paint with touch, test, save, and launch a wider custom map.
  try{await access(temp);throw Error('Test destination already exists');}catch(e){if(e.code!=='ENOENT')throw e;}
- const ed=await browser.newPage({viewport:{width:1280,height:900}});attach(ed);await ed.goto(base+'editor.html');await ed.locator('.grid .cell').first().waitFor();
+ const ed=await browser.newPage({viewport:{width:1000,height:760}});attach(ed);await ed.goto(base+'editor.html');await ed.locator('.grid .cell').first().waitFor();
+ await ed.getByLabel('WORDS CHANGED AT ONCE').selectOption('2');check((await ed.locator('.source').innerText()).includes('maxChanges: 2'),'Maker did not serialize word limit');await ed.reload();await ed.locator('.grid .cell').first().waitFor();check(await ed.getByLabel('WORDS CHANGED AT ONCE').inputValue()==='2','Maker word limit draft not persisted');await ed.getByLabel('WORDS CHANGED AT ONCE').selectOption('1');
  await ed.locator('input[type=text]').fill('ART COMPATIBILITY CHECK');await ed.locator('input[type=number]').fill('997');
  for(let i=0;i<8;i++)await ed.getByRole('button',{name:'+ wide',exact:true}).click();
  await ed.getByRole('button',{name:'GUARD',exact:true}).click();await ed.locator('.cell[title="3,2"]').click();check(await ed.locator('.cell[title="3,2"] .tile-art').evaluate(e=>e.style.backgroundImage.includes('sentinel-states')),'Maker guard art missing');

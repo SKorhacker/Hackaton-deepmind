@@ -442,7 +442,8 @@ body.in-menu #wordbook { display: none; }
 @media (pointer: coarse) and (orientation: landscape) {
   #wordbook { flex-basis: 145px; padding: 12px 8px; }
   #rulebar { padding: 4px 48px; gap: 2px; }
-  .rule, .rule.multi { font-size: 16px; line-height: 1.1; gap: 2px 8px; }
+  #rules { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 2px 14px; }
+  .rule, .rule.multi { font-size: 14px; line-height: 1.1; letter-spacing: .5px; gap: 2px 6px; }
   .word.editable { min-height: 34px; }
   .rule.fixed { font-size: 12px; }
   #chapter-note { font-size: 10px; }
