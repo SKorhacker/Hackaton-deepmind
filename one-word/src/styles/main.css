@@ -367,3 +367,51 @@ body.pad-on #ai-note { max-width: calc(100% - 200px); left: calc(50% - 90px); }
 
 /* While a word is being rewritten the sheet covers the bottom of the screen. */
 body.editing-word #pad { display: none; }
+
+/* ---------- word book (side panel) ---------- */
+#middle { flex: 1; min-height: 0; display: flex; }
+#middle #game { flex: 1; min-width: 0; min-height: 0; }
+body.in-menu #wordbook { display: none; }
+#wordbook {
+  width: 200px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--line);
+  background: #17151f;
+  padding: 16px 14px;
+  overflow-y: auto;
+}
+.wb-head { display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; letter-spacing: 3px; margin-bottom: 12px; }
+#wb-count { color: var(--accent); letter-spacing: 1px; }
+.wb-words { display: flex; flex-direction: column; gap: 6px; }
+.wb-word {
+  font-family: var(--font); font-size: 14px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+  text-align: left; background: #1f1c2b; color: var(--text); border: 1px solid var(--line);
+  border-radius: 6px; padding: 7px 10px;
+}
+.wb-word:hover { border-color: var(--accent); color: var(--accent); filter: none; }
+.wb-word.ai::after { content: ' ✦'; color: var(--accent); }
+.wb-word.new { animation: wbNew 1.6s ease-out; }
+@keyframes wbNew { 0% { background: var(--accent); color: #1a1400; transform: scale(1.08); } 100% { background: #1f1c2b; } }
+.wb-empty { color: var(--dim); font-size: 12px; line-height: 1.55; }
+#wb-tip {
+  position: fixed; z-index: 40; pointer-events: none;
+  max-width: 220px; padding: 8px 10px;
+  background: #0f0d16; border: 1px solid var(--line); border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  font-size: 12px; line-height: 1.45; color: var(--text);
+}
+.wb-tip-word { font-weight: 700; letter-spacing: 1px; }
+.wb-tip-word span { color: var(--accent); }
+.wb-tip-meta { color: var(--dim); font-size: 10px; margin-top: 2px; }
+.wb-tip-meta:empty { display: none; }
+@media (max-width: 800px) { #wordbook { display: none; } }
+
+/* ---------- multi-rule levels ---------- */
+.rule.multi { font-size: clamp(16px, 2.4vw, 24px); }
+#rules:has(.rule.multi) { gap: 2px; }
+.word.editable.changed {
+  background: var(--accent);
+  color: #1a1400;
+  animation: none;
+}
+.word.editable.changed:hover { background: #ffdd88; }

@@ -4,6 +4,7 @@ import { isTouch, keyboardInset } from './Device';
 
 // DOM rule bar ("YOU [DIE] ON RED") + the replace-word popup: a floating panel on
 // desktop, a sheet docked above the virtual keyboard on phones.
+// A level may have several editable words ("slots"); each is clickable.
 
 export type SubmitOutcome = { ok: true } | { ok: false; message: string; hint?: string };
 
@@ -14,9 +15,11 @@ const SHEET_MAX_WIDTH = 720;
 const MAX_CHIPS = 6;
 
 export class RuleEditor {
-  onSubmit: (raw: string) => Promise<SubmitOutcome> = async () => ({ ok: true });
+  onSubmit: (raw: string, slot: number) => Promise<SubmitOutcome> = async () => ({ ok: true });
   onOpen: () => void = () => {};
   isOpen = false;
+  /** Slot (rule index) the popup is editing. */
+  slot = -1;
 
   private rulesEl = $('rules');
   private editor = $('editor');
@@ -81,39 +84,52 @@ export class RuleEditor {
     return window.innerWidth <= SHEET_MAX_WIDTH;
   }
 
-  render(rules: RuleDefinition[], editableIndex: number, animate = false) {
+  private wordEl(slot: number) {
+    return this.rulesEl.querySelector<HTMLElement>(`.word.editable[data-slot="${slot}"]`);
+  }
+
+  /**
+   * @param changed slot currently rewritten (-1 if none)
+   * @param popSlots slots whose word should pop in (new word / reverted word)
+   */
+  render(rules: RuleDefinition[], slots: number[], changed = -1, popSlots: number[] = []) {
     this.rulesEl.innerHTML = '';
-    // Editable rule first, fixed "laws" underneath.
-    const order = [editableIndex, ...rules.map((_, i) => i).filter((i) => i !== editableIndex)];
+    const multi = slots.length > 1;
+    // Editable rules first (in order), fixed "laws" underneath.
+    const order = [...slots, ...rules.map((_, i) => i).filter((i) => !slots.includes(i))];
+    let first = true;
     for (const i of order) {
+      const editable = slots.includes(i);
       const line = document.createElement('div');
-      line.className = 'rule' + (i === editableIndex ? '' : ' fixed');
+      line.className = 'rule' + (editable ? (multi ? ' multi' : '') : ' fixed');
       for (const t of ruleTokens(rules[i])) {
         const span = document.createElement('span');
         span.className = 'word' + (t.editable ? ' editable' : '');
         span.textContent = t.text;
         if (t.editable) {
-          span.id = 'editable-word';
-          span.title = 'Tap to rewrite this word';
-          span.addEventListener('click', () => this.open());
-          if (animate) span.classList.add('pop');
+          span.dataset.slot = String(i);
+          if (first) { span.id = 'editable-word'; first = false; }
+          if (i === changed) span.classList.add('changed');
+          span.title = isTouch() ? 'Tap to rewrite this word' : 'Click to rewrite this word';
+          span.addEventListener('click', () => this.open(i));
+          if (popSlots.includes(i)) span.classList.add('pop');
         }
         line.appendChild(span);
       }
-      if (animate && i === editableIndex) line.classList.add('flash');
+      if (popSlots.includes(i)) line.classList.add('flash');
       this.rulesEl.appendChild(line);
     }
     requestAnimationFrame(() => this.positionTip());
   }
 
-  /** Old word glitches out, then the new rule pops in. */
-  async playRewrite(rules: RuleDefinition[], editableIndex: number) {
-    const old = document.getElementById('editable-word');
-    if (old) {
-      old.classList.add('glitch');
+  /** Old word(s) glitch out, then the new rules pop in. */
+  async playRewrite(rules: RuleDefinition[], slots: number[], changed: number, affected: number[]) {
+    const olds = affected.map((s) => this.wordEl(s)).filter((e): e is HTMLElement => !!e);
+    if (olds.length) {
+      olds.forEach((o) => o.classList.add('glitch'));
       await new Promise((r) => setTimeout(r, 300));
     }
-    this.render(rules, editableIndex, true);
+    this.render(rules, slots, changed, affected);
   }
 
   setTutorial(stage: 'click' | 'type' | null) {
@@ -123,14 +139,16 @@ export class RuleEditor {
     this.positionTip();
   }
 
-  open() {
-    if (this.isOpen) return;
-    const word = document.getElementById('editable-word');
+  open(slot: number, prefill = '') {
+    if (this.isOpen && slot === this.slot) { if (prefill) { this.input.value = prefill; this.input.focus(); } return; }
+    if (this.isOpen) this.close();
+    const word = this.wordEl(slot);
     if (!word) return;
+    this.slot = slot;
     this.isOpen = true;
     word.classList.add('editing');
     $('editor-old').textContent = `"${word.textContent}"`;
-    this.input.value = '';
+    this.input.value = prefill;
     this.msg.textContent = '';
     this.msg.className = '';
     this.hint.textContent = '';
@@ -147,12 +165,14 @@ export class RuleEditor {
     this.isOpen = false;
     this.editor.hidden = true;
     document.body.classList.remove('editing-word');
-    document.getElementById('editable-word')?.classList.remove('editing');
+    const tip = document.getElementById('wb-tip');
+    if (tip) tip.hidden = true;
+    this.rulesEl.querySelectorAll('.editing').forEach((e) => e.classList.remove('editing'));
     this.input.blur();
   }
 
   private position() {
-    const word = document.getElementById('editable-word');
+    const word = this.wordEl(this.slot);
     if (!word || this.editor.hidden) return;
     const s = this.editor.style;
     if (this.sheetMode) {
@@ -189,7 +209,7 @@ export class RuleEditor {
       this.msg.textContent = 'THE WORLD IS THINKING';
     }, 150);
     let out: SubmitOutcome;
-    try { out = await this.onSubmit(raw); } finally { clearTimeout(thinking); this.busy = false; }
+    try { out = await this.onSubmit(raw, this.slot); } finally { clearTimeout(thinking); this.busy = false; }
     if (out.ok) { this.close(); return; }
     this.msg.className = 'err';
     this.msg.textContent = out.message;

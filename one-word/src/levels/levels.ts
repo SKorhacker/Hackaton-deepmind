@@ -100,4 +100,65 @@ export const LEVELS: LevelData[] = [
     ],
     solutions: ['HELP', 'FLEE', 'FOLLOW'],
   },
+  {
+    id: 6,
+    name: 'ISLAND',
+    ...parseMap([
+      '#############',
+      '#...........#',
+      '#.P.........#',
+      '#......RRRR.#',
+      '#......R.ER.#',
+      '#......RG.R.#',
+      '#......RRRR.#',
+      '#...........#',
+      '#############',
+    ]),
+    rules: [
+      {
+        subject: 'GUARD', verb: 'CHASE', object: 'YOU',
+        editablePart: 'verb', allowedReplacements: ['CHASE', 'FOLLOW', 'FLEE', 'SLEEP', 'HELP', 'FREEZE'],
+      },
+      {
+        subject: 'YOU', verb: 'DIE', condition: 'ON_RED',
+        editablePart: 'subject', allowedReplacements: ['YOU', 'GUARD', 'EVERYONE'],
+      },
+    ],
+    solutions: ['GUARD'],
+    timed: true,
+    intro: 'Words can change at any moment.',
+  },
+  {
+    id: 7,
+    name: 'TRAP',
+    ...parseMap([
+      '###############',
+      '#P.......#....#',
+      '#........#.E..#',
+      '#..RRR...#....#',
+      '#..R_R...##D###',
+      '#..R.R..BBB...#',
+      '#..RRR..#####.#',
+      '#.............#',
+      '#......G......#',
+      '###############',
+    ]),
+    rules: [
+      {
+        subject: 'GUARD', verb: 'CHASE', object: 'YOU',
+        editablePart: 'verb', allowedReplacements: ['CHASE', 'FOLLOW', 'FLEE', 'SLEEP', 'HELP', 'FREEZE'],
+      },
+      {
+        subject: 'EVERYONE', verb: 'DIE', condition: 'ON_RED',
+        editablePart: 'subject', allowedReplacements: ['EVERYONE', 'YOU', 'GUARD'],
+      },
+      {
+        subject: 'YOU', verb: 'FREEZE', condition: 'ON_BLUE',
+        editablePart: 'verb', allowedReplacements: ['FREEZE', 'BOUNCE', 'HIDE', 'HEAL', 'SLEEP', 'DIE'],
+      },
+    ],
+    solutions: ['HELP'],
+    timed: true,
+    intro: 'One word at a time. Not one word only.',
+  },
 ];

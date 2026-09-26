@@ -19,7 +19,8 @@ const WORDS: Record<string, string> = {
   attack: 'ATTACK', fight: 'ATTACK', hit: 'ATTACK', punch: 'ATTACK', strike: 'ATTACK', bite: 'ATTACK', eat: 'ATTACK', destroy: 'ATTACK', ate: 'ATTACK',
   // --- nouns ---
   you: 'YOU', me: 'YOU', player: 'YOU', i: 'YOU', myself: 'YOU', hero: 'YOU',
-  guard: 'GUARD', guards: 'GUARD', enemy: 'GUARD', monster: 'GUARD',
+  guard: 'GUARD', guards: 'GUARD', enemy: 'GUARD', monster: 'GUARD', them: 'GUARD', it: 'GUARD',
+  everyone: 'EVERYONE', everybody: 'EVERYONE', all: 'EVERYONE', anyone: 'EVERYONE', we: 'EVERYONE', us: 'EVERYONE', both: 'EVERYONE',
   key: 'KEY', keys: 'KEY', treasure: 'KEY', gold: 'KEY', coin: 'KEY', loot: 'KEY', prize: 'KEY',
   exit: 'EXIT', goal: 'EXIT', finish: 'EXIT', end: 'EXIT', portal: 'EXIT', flag: 'EXIT',
   red: 'RED', lava: 'RED', fire: 'RED', crimson: 'RED', scarlet: 'RED',
