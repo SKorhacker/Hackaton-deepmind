@@ -1,4 +1,4 @@
-import type { Mechanic, RuleDefinition, RulePart } from './RuleDefinition';
+import { editableSlots, type Mechanic, type RuleDefinition, type RulePart } from './RuleDefinition';
 
 // Turns a rule into display tokens: "GUARD CHASES [YOU]".
 
@@ -22,9 +22,21 @@ const CONDITION_TEXT: Record<string, string> = {
   NEAR_YOU: 'NEAR YOU',
 };
 
+/** Every editable word of a level, in reading order. */
+export interface LevelSlot {
+  ruleIndex: number;
+  part: RulePart;
+  allowedReplacements: string[];
+}
+
+export function levelSlots(rules: RuleDefinition[]): LevelSlot[] {
+  return rules.flatMap((rule, ruleIndex) => editableSlots(rule).map((slot) => ({ ruleIndex, ...slot })));
+}
+
 export function ruleTokens(rule: RuleDefinition): RuleToken[] {
   const t: RuleToken[] = [];
-  const ed = (p: RulePart) => rule.editablePart === p;
+  const parts = new Set(editableSlots(rule).map((s) => s.part));
+  const ed = (p: RulePart) => parts.has(p);
   t.push({ text: rule.subject, part: 'subject', editable: ed('subject') });
   t.push({ text: conjugate(rule.verb, rule.subject), part: 'verb', editable: ed('verb') });
   if (rule.object && (ed('object') || !INTRANSITIVE.includes(rule.verb))) {
@@ -40,9 +52,9 @@ export function ruleText(rule: RuleDefinition): string {
   return ruleTokens(rule).map((t) => t.text).join(' ');
 }
 
-/** The current value of the editable word, as a mechanic/noun token. */
-export function editableValue(rule: RuleDefinition): string | undefined {
-  switch (rule.editablePart) {
+/** The current value of an editable word, as a mechanic/noun token. */
+export function editableValue(rule: RuleDefinition, part: RulePart): string | undefined {
+  switch (part) {
     case 'subject': return rule.subject;
     case 'verb': return rule.verb;
     case 'object': return rule.object;
@@ -51,9 +63,9 @@ export function editableValue(rule: RuleDefinition): string | undefined {
   return undefined;
 }
 
-export function withReplacement(rule: RuleDefinition, token: string): RuleDefinition {
+export function withReplacement(rule: RuleDefinition, token: string, part: RulePart): RuleDefinition {
   const r = { ...rule };
-  switch (rule.editablePart) {
+  switch (part) {
     case 'subject': r.subject = token as RuleDefinition['subject']; break;
     case 'verb': r.verb = token as Mechanic; break;
     case 'object': r.object = token as RuleDefinition['object']; break;

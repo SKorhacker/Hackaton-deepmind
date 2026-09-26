@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { COLORS, OPENAI_MODEL, openAIKey, setOpenAIKey } from '../config/GameConfig';
+import { COLORS, aiProvider, setAIKey } from '../config/GameConfig';
 import { LEVELS } from '../levels/levels';
 import { session } from '../config/Session';
 import { isTouch } from '../ui/Device';
@@ -43,8 +43,12 @@ export class MenuScene extends Phaser.Scene {
     this.add.text(W / 2, H * 0.26 + 72 * s, 'Change one word.\nChange the world.', { fontFamily: FONT, fontSize: fs(20, 14), color: '#8a85a0', align: 'center', lineSpacing: 6 * s }).setOrigin(0.5);
 
     const btnH = Math.max(MIN_TAP, 48 * s);
-    this.button(W / 2, H * 0.6, Math.min(W - 48, 240 * Math.max(s, 0.8)), btnH, 'PLAY', true, fs(18, 15), () => this.start(0));
-    this.button(W / 2, H * 0.6 + btnH + 14, Math.min(W - 48, 240 * Math.max(s, 0.8)), btnH, 'HOW TO PLAY', false, fs(16, 13), () => this.howTo());
+    const btnW = Math.min(W - 48, 240 * Math.max(s, 0.8));
+    const btnY = H * 0.52;
+    const btnGap = btnH + 14;
+    this.button(W / 2, btnY, btnW, btnH, 'PLAY', true, fs(18, 15), () => this.start(0));
+    this.button(W / 2, btnY + btnGap, btnW, btnH, 'HOW TO PLAY', false, fs(16, 13), () => this.howTo());
+    this.button(W / 2, btnY + btnGap * 2, btnW, btnH, 'MAKE A LEVEL', false, fs(16, 13), () => { window.location.href = './editor.html'; });
 
     // Level select (handy for demos).
     const gap = Math.max(MIN_TAP, 44 * s);
@@ -69,11 +73,15 @@ export class MenuScene extends Phaser.Scene {
     this.add.text(W / 2, ly - Math.max(26, 30 * s), 'LEVELS', { fontFamily: FONT, fontSize: fs(11, 10), color: '#5d5873' }).setOrigin(0.5);
 
     const ai = this.add.text(W - 10, H - 8, '', { fontFamily: FONT, fontSize: fs(11, 10), color: '#5d5873' }).setOrigin(1, 1).setInteractive({ useHandCursor: true });
-    const refreshAi = () => ai.setText(openAIKey() ? `AI: ON (${OPENAI_MODEL})` : 'AI: OFF · tap to add an OpenAI key');
+    const refreshAi = () => {
+      const p = aiProvider();
+      const tap = isTouch() ? 'tap' : 'click';
+      ai.setText(p ? `AI: ON (${p.model})` : `AI: OFF · ${tap} to add a Gemini or OpenAI key`);
+    };
     refreshAi();
     ai.on('pointerdown', () => {
-      const k = window.prompt('OpenAI API key (stored only in this browser). Leave empty to turn AI off.', '');
-      if (k !== null) { setOpenAIKey(k.trim()); refreshAi(); }
+      const k = window.prompt('Gemini (Google AI Studio) or OpenAI API key, stored only in this browser. Leave empty to turn AI off.', '');
+      if (k !== null) { setAIKey(k.trim()); refreshAi(); }
     });
 
     this.input.keyboard?.on('keydown-ENTER', () => this.start(0));

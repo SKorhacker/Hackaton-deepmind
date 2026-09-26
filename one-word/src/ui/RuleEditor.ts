@@ -1,10 +1,11 @@
 import type { RuleDefinition } from '../rules/RuleDefinition';
-import { ruleTokens } from '../rules/RuleParser';
+import { ruleTokens, type LevelSlot } from '../rules/RuleParser';
 import { isTouch, keyboardInset } from './Device';
 
 // DOM rule bar ("YOU [DIE] ON RED") + the replace-word popup: a floating panel on
 // desktop, a sheet docked above the virtual keyboard on phones.
-// A level may have several editable words ("slots"); each is clickable.
+// A level may have several editable words ("slots", in reading order; a rule may
+// hold more than one); each is clickable and addressed by its slot index.
 
 export type SubmitOutcome = { ok: true } | { ok: false; message: string; hint?: string };
 
@@ -18,7 +19,7 @@ export class RuleEditor {
   onSubmit: (raw: string, slot: number) => Promise<SubmitOutcome> = async () => ({ ok: true });
   onOpen: () => void = () => {};
   isOpen = false;
-  /** Slot (rule index) the popup is editing. */
+  /** Slot index the popup is editing. */
   slot = -1;
 
   private rulesEl = $('rules');
@@ -89,41 +90,44 @@ export class RuleEditor {
   }
 
   /**
-   * @param changed slot currently rewritten (-1 if none)
+   * @param changed slots currently rewritten
    * @param popSlots slots whose word should pop in (new word / reverted word)
    */
-  render(rules: RuleDefinition[], slots: number[], changed = -1, popSlots: number[] = []) {
+  render(rules: RuleDefinition[], slots: LevelSlot[], changed: readonly number[] = [], popSlots: number[] = []) {
     this.rulesEl.innerHTML = '';
+    const editableRules = [...new Set(slots.map((s) => s.ruleIndex))];
     const multi = slots.length > 1;
     // Editable rules first (in order), fixed "laws" underneath.
-    const order = [...slots, ...rules.map((_, i) => i).filter((i) => !slots.includes(i))];
+    const order = [...editableRules, ...rules.map((_, i) => i).filter((i) => !editableRules.includes(i))];
     let first = true;
     for (const i of order) {
-      const editable = slots.includes(i);
+      const editable = editableRules.includes(i);
       const line = document.createElement('div');
       line.className = 'rule' + (editable ? (multi ? ' multi' : '') : ' fixed');
+      let pops = false;
       for (const t of ruleTokens(rules[i])) {
         const span = document.createElement('span');
         span.className = 'word' + (t.editable ? ' editable' : '');
         span.textContent = t.text;
-        if (t.editable) {
-          span.dataset.slot = String(i);
+        const slot = t.editable ? slots.findIndex((s) => s.ruleIndex === i && s.part === t.part) : -1;
+        if (slot >= 0) {
+          span.dataset.slot = String(slot);
           if (first) { span.id = 'editable-word'; first = false; }
-          if (i === changed) span.classList.add('changed');
+          if (changed.includes(slot)) span.classList.add('changed');
           span.title = isTouch() ? 'Tap to rewrite this word' : 'Click to rewrite this word';
-          span.addEventListener('click', () => this.open(i));
-          if (popSlots.includes(i)) span.classList.add('pop');
+          span.addEventListener('click', () => this.open(slot));
+          if (popSlots.includes(slot)) { span.classList.add('pop'); pops = true; }
         }
         line.appendChild(span);
       }
-      if (popSlots.includes(i)) line.classList.add('flash');
+      if (pops) line.classList.add('flash');
       this.rulesEl.appendChild(line);
     }
     requestAnimationFrame(() => this.positionTip());
   }
 
   /** Old word(s) glitch out, then the new rules pop in. */
-  async playRewrite(rules: RuleDefinition[], slots: number[], changed: number, affected: number[]) {
+  async playRewrite(rules: RuleDefinition[], slots: LevelSlot[], changed: readonly number[], affected: number[]) {
     const olds = affected.map((s) => this.wordEl(s)).filter((e): e is HTMLElement => !!e);
     if (olds.length) {
       olds.forEach((o) => o.classList.add('glitch'));
