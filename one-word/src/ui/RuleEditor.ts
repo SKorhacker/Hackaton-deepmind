@@ -75,14 +75,14 @@ export class RuleEditor {
     this.positionTip();
   }
 
-  open() {
-    if (this.isOpen) return;
+  open(prefill = '') {
+    if (this.isOpen) { if (prefill) { this.input.value = prefill; this.input.focus(); } return; }
     const word = document.getElementById('editable-word');
     if (!word) return;
     this.isOpen = true;
     word.classList.add('editing');
     $('editor-old').textContent = `"${word.textContent}"`;
-    this.input.value = '';
+    this.input.value = prefill;
     this.msg.textContent = '';
     this.msg.className = '';
     this.hint.textContent = '';
@@ -96,6 +96,8 @@ export class RuleEditor {
     if (!this.isOpen) return;
     this.isOpen = false;
     this.editor.hidden = true;
+    const tip = document.getElementById('wb-tip');
+    if (tip) tip.hidden = true;
     document.getElementById('editable-word')?.classList.remove('editing');
     this.input.blur();
   }

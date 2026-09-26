@@ -5,10 +5,12 @@ import { T, type LevelData, type Pos } from '../levels/LevelData';
 import type { Mechanic } from '../rules/RuleDefinition';
 import { ruleTokens } from '../rules/RuleParser';
 import { RuleManager } from '../rules/RuleManager';
+import { normalizeWord } from '../rules/WordInterpreter';
 import { LLMWordInterpreter } from '../rules/LLMWordInterpreter';
 import { World, type WorldEvent } from '../systems/World';
 import { RuleEditor } from '../ui/RuleEditor';
 import { LevelCompleteUI } from '../ui/LevelCompleteUI';
+import { WordBook } from '../ui/WordBook';
 import { sfx } from '../ui/Sfx';
 import { fmtTime, foundFor, session } from '../config/Session';
 
@@ -17,6 +19,7 @@ const FONT = '"Space Mono", monospace';
 // DOM widgets live for the whole page; scenes just rebind their callbacks.
 let editor: RuleEditor;
 let complete: LevelCompleteUI;
+let wordbook: WordBook;
 
 // What a tile looks like under the current rule.
 const TILE_GLYPH: Partial<Record<Mechanic, string>> = {
@@ -70,6 +73,8 @@ export class GameScene extends Phaser.Scene {
   private wordsTried = 0;
   private deaths = 0;
   private finished = false;
+  /** The word currently written into the rule; unlocked in the word book if it solves the level. */
+  private activeWord: { word: string; token: string; ai: boolean } | null = null;
   private onKey = (e: KeyboardEvent) => this.handleKey(e);
 
   constructor() { super('game'); }
@@ -86,6 +91,7 @@ export class GameScene extends Phaser.Scene {
     document.body.classList.remove('in-menu');
     editor ??= new RuleEditor();
     complete ??= new LevelCompleteUI();
+    wordbook ??= new WordBook();
     complete.hide();
     editor.close();
 
@@ -107,6 +113,8 @@ export class GameScene extends Phaser.Scene {
     editor.onSubmit = (raw) => this.submitWord(raw);
     editor.onOpen = () => { if (this.level.tutorial && !session.tutorialDone) editor.setTutorial('type'); };
     editor.render(this.rules.rules, this.rules.editableIndex);
+    wordbook.onPick = (w) => editor.open(w);
+    wordbook.render();
     editor.setTutorial(this.level.tutorial && !session.tutorialDone ? 'click' : null);
     document.getElementById('level-name')!.textContent = `LEVEL ${this.level.id} · ${this.level.name}`;
     (document.getElementById('btn-restart') as HTMLButtonElement).onclick = () => this.restart();
@@ -409,6 +417,7 @@ export class GameScene extends Phaser.Scene {
   /** Put entities back. `fullReset` also restores the original rule (R key). */
   private resetWorld(fullReset: boolean) {
     if (fullReset) {
+      this.activeWord = null;
       this.rules.reset();
       editor.render(this.rules.rules, this.rules.editableIndex);
     }
@@ -463,6 +472,7 @@ export class GameScene extends Phaser.Scene {
     if (res.token === this.rules.currentToken) {
       return { ok: false as const, message: "THAT'S ALREADY THE RULE." };
     }
+    this.activeWord = { word: normalizeWord(raw) ?? raw.trim(), token: res.token, ai: res.source === 'ai' };
     this.rules.apply(res.token);
     this.world.setRules(this.rules.rules);
     void editor.playRewrite(this.rules.rules, this.rules.editableIndex);
@@ -506,6 +516,8 @@ export class GameScene extends Phaser.Scene {
     const found = foundFor(this.level.id);
     const isNew = !found.has(token);
     found.add(token);
+    const w = this.activeWord;
+    const unlocked = w && w.token === token && wordbook.add(w.word, w.token, w.ai, this.level.id) ? w.word.toUpperCase() : null;
     const time = this.time.now - this.startTime;
     const prev = session.best.get(this.level.id);
     if (!prev || time < prev.time) session.best.set(this.level.id, { time, words: this.wordsTried, deaths: this.deaths, solution: token });
@@ -523,6 +535,7 @@ export class GameScene extends Phaser.Scene {
         ['Words tried', String(this.wordsTried)],
         ['Deaths', String(this.deaths)],
         ['Solution', expected ? token : `${token} (unexpected!)`],
+        ...(unlocked ? [['Word unlocked', `${unlocked}${w!.ai ? ' ✦' : ''}`] as [string, string]] : []),
       ],
       solutions: this.level.solutions.length > 1 ? { list: this.level.solutions, found } : null,
       nextLabel: last ? 'FINISH →' : 'NEXT LEVEL →',
