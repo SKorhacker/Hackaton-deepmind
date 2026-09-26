@@ -11,6 +11,8 @@ const REF_W = 960;
 const REF_H = 540;
 /** Touch targets stay finger-sized however small the screen gets. */
 const MIN_TAP = 44;
+/** Gap kept between the title block and the first button. */
+const HEAD_CLEARANCE = 8;
 
 export class MenuScene extends Phaser.Scene {
   private lastSize = { w: 0, h: 0 };
@@ -59,7 +61,11 @@ export class MenuScene extends Phaser.Scene {
         this.time.delayedCall(260, () => title.setText('ONE WORD').setColor('#ece8f5'));
       },
     });
-    this.add.text(W / 2, title.getBounds().bottom + Math.max(8, 10 * s), 'Change one word.\nChange the world.', { fontFamily: FONT, fontSize: `${Math.max(11, Math.round(Math.min(20 * s, titlePx * 0.3)))}px`, color: '#8a85a0', align: 'center', lineSpacing: 4 * s }).setOrigin(0.5, 0);
+    const subtitle = this.add.text(W / 2, title.getBounds().bottom + Math.max(8, 10 * s), 'Change one word.\nChange the world.', { fontFamily: FONT, fontSize: `${Math.max(11, Math.round(Math.min(20 * s, titlePx * 0.3)))}px`, color: '#8a85a0', align: 'center', lineSpacing: 4 * s }).setOrigin(0.5, 0);
+    // The head block is measured, not estimated: on short landscape screens the
+    // subtitle would otherwise sit right on the mode picker's border.
+    const spill = subtitle.getBounds().bottom - (stackTop - HEAD_CLEARANCE);
+    if (spill > 0) { title.y -= spill; subtitle.y -= spill; }
 
     // Mode picker: the game is playable either as the shipped twelve mechanics
     // or with every typed word invented on the spot.
