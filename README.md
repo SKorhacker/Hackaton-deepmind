@@ -35,9 +35,8 @@ npm run dev          # open the address it prints
 To use Gemini, put a [Google AI Studio](https://aistudio.google.com/apikey) key in `one-word/.env.local`
 (`VITE_GEMINI_API_KEY=...`), or paste it on the title screen. The game is fully playable without a key.
 
-> **📸 Screenshot to add — `docs/screenshots/title.png`**
-> The title screen: the big **ONE WORD** title, "Change one word. Change the world.", the PLAY button with the
-> **NORMAL / CREATIVE** toggle beside it, the level numbers along the bottom and "AI interpreter: ON" in the corner.
+![Uploading image.png…]()
+
 
 ---
 
