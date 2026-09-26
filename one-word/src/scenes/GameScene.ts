@@ -157,6 +157,17 @@ export class GameScene extends Phaser.Scene {
     window.addEventListener('keydown', this.onKey);
     this.events.once('shutdown', () => window.removeEventListener('keydown', this.onKey));
 
+    // Clicking a neighbouring tile moves there (clicking yourself waits), so the
+    // game is playable when the keyboard goes elsewhere — an embedded viewer, a
+    // touch screen, or right after typing a word.
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
+      if (editor.isOpen || complete.isOpen) return;
+      const dx = Math.floor((p.worldX - this.ox) / this.ts) - this.world.s.player.x;
+      const dy = Math.floor((p.worldY - this.oy) / this.ts) - this.world.s.player.y;
+      if (dx === 0 && dy === 0) this.turn(null);
+      else if (Math.abs(dx) + Math.abs(dy) === 1) this.turn({ x: dx, y: dy });
+    });
+
     this.startTime = this.time.now;
     this.updateStats();
     this.sync(false);

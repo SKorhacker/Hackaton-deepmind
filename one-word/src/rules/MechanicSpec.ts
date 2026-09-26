@@ -142,7 +142,7 @@ export function parseSpec(token: string, raw: unknown): MechanicSpec | null {
   if (!spec.tile && !spec.motion) return null;
   if (typeof o.glyph === 'string' && o.glyph.trim()) spec.glyph = [...o.glyph.trim()][0];
   if (typeof o.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(o.color)) spec.color = o.color;
-  if (typeof o.note === 'string') spec.note = o.note.slice(0, 60);
+  if (typeof o.note === 'string') spec.note = o.note.slice(0, 90);
   return spec;
 }
 

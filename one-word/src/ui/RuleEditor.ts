@@ -122,6 +122,8 @@ export class RuleEditor {
     if (tip) tip.hidden = true;
     this.rulesEl.querySelectorAll('.editing').forEach((e) => e.classList.remove('editing'));
     this.input.blur();
+    // Hand the keyboard back to the game instead of leaving it on the page.
+    document.querySelector('canvas')?.focus();
   }
 
   private position() {
