@@ -39,3 +39,6 @@ export async function toggleFullscreen() {
 /** True where the fullscreen button can do anything at all (iOS Safari: it cannot). */
 export const fullscreenSupported = () =>
   !!(document.fullscreenEnabled || (document.documentElement as HTMLElement & { webkitRequestFullscreen?: unknown }).webkitRequestFullscreen);
+
+/** Gameplay on touch devices is intentionally landscape-only. */
+export const portraitBlocked = () => isTouch() && window.innerHeight > window.innerWidth;

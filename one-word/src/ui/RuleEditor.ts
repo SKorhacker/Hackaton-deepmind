@@ -1,6 +1,7 @@
+import { sfx } from './Sfx';
 import type { RuleDefinition } from '../rules/RuleDefinition';
 import { ruleTokens, type LevelSlot } from '../rules/RuleParser';
-import { isTouch, keyboardInset } from './Device';
+import { isTouch, keyboardInset, portraitBlocked } from './Device';
 
 // DOM rule bar ("YOU [DIE] ON RED") + the replace-word popup: a floating panel on
 // desktop, a sheet docked above the virtual keyboard on phones.
@@ -31,7 +32,8 @@ export class RuleEditor {
   private chips = $('editor-chips');
   private busy = false;
   private suggestions: string[] = [];
-  private recent: string[] = [];
+  private unlocked: string[] = [];
+  private renderRevision = 0;
 
   constructor() {
     $('editor-form').addEventListener('submit', (e) => { e.preventDefault(); this.submit(); });
@@ -56,16 +58,11 @@ export class RuleEditor {
     this.suggestions = words;
   }
 
-  /** Words the player already got the world to accept, offered again as chips. */
-  rememberWord(raw: string) {
-    const w = raw.trim().toLowerCase();
-    if (!w) return;
-    this.recent = [w, ...this.recent.filter((r) => r !== w)].slice(0, MAX_CHIPS);
-  }
+  setUnlockedWords(words: string[]) { this.unlocked = words; this.renderChips(); }
 
   private renderChips() {
     const words: string[] = [];
-    for (const w of [...this.suggestions, ...this.recent]) {
+    for (const w of [...this.unlocked, ...this.suggestions]) {
       const l = w.toLowerCase();
       if (!words.includes(l)) words.push(l);
     }
@@ -76,13 +73,13 @@ export class RuleEditor {
       b.type = 'button';
       b.className = 'chip';
       b.textContent = w.toUpperCase();
-      b.addEventListener('click', () => { this.input.value = w; void this.submit(); });
+      b.addEventListener('click', () => { sfx.click(); this.input.value = w; void this.submit(); });
       this.chips.appendChild(b);
     }
   }
 
   private get sheetMode() {
-    return window.innerWidth <= SHEET_MAX_WIDTH;
+    return isTouch() || window.innerWidth <= SHEET_MAX_WIDTH;
   }
 
   private wordEl(slot: number) {
@@ -94,6 +91,7 @@ export class RuleEditor {
    * @param popSlots slots whose word should pop in (new word / reverted word)
    */
   render(rules: RuleDefinition[], slots: LevelSlot[], changed: readonly number[] = [], popSlots: number[] = []) {
+    this.renderRevision++;
     this.rulesEl.innerHTML = '';
     const editableRules = [...new Set(slots.map((s) => s.ruleIndex))];
     const multi = slots.length > 1;
@@ -115,7 +113,9 @@ export class RuleEditor {
           if (first) { span.id = 'editable-word'; first = false; }
           if (changed.includes(slot)) span.classList.add('changed');
           span.title = isTouch() ? 'Tap to rewrite this word' : 'Click to rewrite this word';
+          span.tabIndex = 0; span.setAttribute('role', 'button');
           span.addEventListener('click', () => this.open(slot));
+          span.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); this.open(slot); } });
           if (popSlots.includes(slot)) { span.classList.add('pop'); pops = true; }
         }
         line.appendChild(span);
@@ -128,12 +128,13 @@ export class RuleEditor {
 
   /** Old word(s) glitch out, then the new rules pop in. */
   async playRewrite(rules: RuleDefinition[], slots: LevelSlot[], changed: readonly number[], affected: number[]) {
+    const revision = this.renderRevision;
     const olds = affected.map((s) => this.wordEl(s)).filter((e): e is HTMLElement => !!e);
     if (olds.length) {
       olds.forEach((o) => o.classList.add('glitch'));
       await new Promise((r) => setTimeout(r, 300));
     }
-    this.render(rules, slots, changed, affected);
+    if (revision === this.renderRevision) this.render(rules, slots, changed, affected);
   }
 
   setTutorial(stage: 'click' | 'type' | null) {
@@ -144,10 +145,12 @@ export class RuleEditor {
   }
 
   open(slot: number, prefill = '') {
+    if (portraitBlocked()) return;
     if (this.isOpen && slot === this.slot) { if (prefill) { this.input.value = prefill; this.input.focus(); } return; }
     if (this.isOpen) this.close();
     const word = this.wordEl(slot);
     if (!word) return;
+    sfx.click();
     this.slot = slot;
     this.isOpen = true;
     word.classList.add('editing');
@@ -156,12 +159,12 @@ export class RuleEditor {
     this.msg.textContent = '';
     this.msg.className = '';
     this.hint.textContent = '';
+    this.onOpen();
     this.renderChips();
     this.editor.hidden = false;
     document.body.classList.add('editing-word');
     this.position();
     this.input.focus();
-    this.onOpen();
   }
 
   close() {
