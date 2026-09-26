@@ -31,7 +31,18 @@ export class MenuScene extends Phaser.Scene {
     const fs = (px: number, min = 13) => `${Math.max(min, Math.round(px * s))}px`;
     this.drawBackdrop(W, H);
 
-    const title = this.add.text(W / 2, H * 0.26, 'ONE WORD', { fontFamily: FONT, fontSize: fs(84), fontStyle: 'bold', color: '#ece8f5' }).setOrigin(0.5);
+    // Bottom-up layout: the level row is anchored to the bottom edge, the buttons stack
+    // upward from it, and the title takes whatever height is left (landscape phones
+    // otherwise push the last button onto the level row).
+    const btnH = Math.max(MIN_TAP, 48 * s);
+    const levelY = H - Math.max(40, 64 * s);
+    const labelY = levelY - Math.max(26, 30 * s);
+    const btnGap = Math.max(8, 14 * s);
+    const stackTop = Math.min(H * 0.52 - btnH / 2, labelY - Math.max(10, 16 * s) - (btnH * 3 + btnGap * 2));
+    const headH = Math.max(60, stackTop - Math.max(8, 12 * s));
+    const titlePx = Math.round(Math.min(84 * s, headH * 0.34));
+
+    const title = this.add.text(W / 2, headH * 0.42, 'ONE WORD', { fontFamily: FONT, fontSize: `${titlePx}px`, fontStyle: 'bold', color: '#ece8f5' }).setOrigin(0.5);
     // Every few seconds the world briefly misreads its own title.
     this.time.addEvent({
       delay: 2600, loop: true, callback: () => {
@@ -40,20 +51,19 @@ export class MenuScene extends Phaser.Scene {
         this.time.delayedCall(260, () => title.setText('ONE WORD').setColor('#ece8f5'));
       },
     });
-    this.add.text(W / 2, H * 0.26 + 72 * s, 'Change one word.\nChange the world.', { fontFamily: FONT, fontSize: fs(20, 14), color: '#8a85a0', align: 'center', lineSpacing: 6 * s }).setOrigin(0.5);
+    this.add.text(W / 2, title.getBounds().bottom + Math.max(8, 10 * s), 'Change one word.\nChange the world.', { fontFamily: FONT, fontSize: `${Math.max(11, Math.round(Math.min(20 * s, titlePx * 0.3)))}px`, color: '#8a85a0', align: 'center', lineSpacing: 4 * s }).setOrigin(0.5, 0);
 
-    const btnH = Math.max(MIN_TAP, 48 * s);
     const btnW = Math.min(W - 48, 240 * Math.max(s, 0.8));
-    const btnY = H * 0.52;
-    const btnGap = btnH + 14;
+    const btnY = stackTop + btnH / 2;
+    const step = btnH + btnGap;
     this.button(W / 2, btnY, btnW, btnH, 'PLAY', true, fs(18, 15), () => this.start(0));
-    this.button(W / 2, btnY + btnGap, btnW, btnH, 'HOW TO PLAY', false, fs(16, 13), () => this.howTo());
-    this.button(W / 2, btnY + btnGap * 2, btnW, btnH, 'MAKE A LEVEL', false, fs(16, 13), () => { window.location.href = './editor.html'; });
+    this.button(W / 2, btnY + step, btnW, btnH, 'HOW TO PLAY', false, fs(16, 13), () => this.howTo());
+    this.button(W / 2, btnY + step * 2, btnW, btnH, 'MAKE A LEVEL', false, fs(16, 13), () => { window.location.href = './editor.html'; });
 
     // Level select (handy for demos).
-    const gap = Math.max(MIN_TAP, 44 * s);
+    const gap = Math.min(Math.max(MIN_TAP, 44 * s), (W - 24) / LEVELS.length);
     const lx = W / 2 - ((LEVELS.length - 1) * gap) / 2;
-    const ly = H - Math.max(40, 64 * s);
+    const ly = levelY;
     LEVELS.forEach((l, i) => {
       const solved = session.best.has(l.id);
       const t = this.add.text(lx + i * gap, ly, String(l.id), {
@@ -70,7 +80,7 @@ export class MenuScene extends Phaser.Scene {
       t.on('pointerout', () => t.setColor(solved ? '#5ee6a0' : '#5d5873'));
       t.on('pointerdown', () => this.start(i));
     });
-    this.add.text(W / 2, ly - Math.max(26, 30 * s), 'LEVELS', { fontFamily: FONT, fontSize: fs(11, 10), color: '#5d5873' }).setOrigin(0.5);
+    this.add.text(W / 2, labelY, 'LEVELS', { fontFamily: FONT, fontSize: fs(11, 10), color: '#5d5873' }).setOrigin(0.5);
 
     const ai = this.add.text(W - 10, H - 8, '', { fontFamily: FONT, fontSize: fs(11, 10), color: '#5d5873' }).setOrigin(1, 1).setInteractive({ useHandCursor: true });
     const refreshAi = () => {
