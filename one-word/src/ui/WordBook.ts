@@ -1,6 +1,8 @@
 // Side panel of words that solved a level (unlocked).
 // Meanings stay hidden until you hover a word. Kept in localStorage.
 
+import { sfx } from './Sfx';
+
 interface Entry { word: string; token: string; ai: boolean; level?: number }
 
 const MEANING: Record<string, string> = {
@@ -31,7 +33,7 @@ export class WordBook {
 
     this.list.addEventListener('click', (e) => {
       const w = (e.target as HTMLElement).closest('.wb-word') as HTMLElement | null;
-      if (w?.dataset.word) this.onPick(w.dataset.word);
+      if (w?.dataset.word) { sfx.click(); this.onPick(w.dataset.word); }
     });
     this.list.addEventListener('mouseover', (e) => {
       const w = (e.target as HTMLElement).closest('.wb-word') as HTMLElement | null;

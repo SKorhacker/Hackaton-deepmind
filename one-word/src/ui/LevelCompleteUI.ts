@@ -1,5 +1,7 @@
 // "LEVEL COMPLETE" card and the final end-of-game summary.
 
+import { sfx } from './Sfx';
+
 const $ = (id: string) => document.getElementById(id)!;
 
 export interface CompleteInfo {
@@ -20,8 +22,8 @@ export class LevelCompleteUI {
   isOpen = false;
 
   constructor() {
-    $('btn-next').addEventListener('click', () => this.onNext());
-    $('btn-replay').addEventListener('click', () => this.onReplay());
+    $('btn-next').addEventListener('click', () => { sfx.click(); this.onNext(); });
+    $('btn-replay').addEventListener('click', () => { sfx.click(); this.onReplay(); });
   }
 
   show(info: CompleteInfo, onNext: () => void, onReplay: () => void) {

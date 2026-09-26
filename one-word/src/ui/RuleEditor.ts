@@ -1,5 +1,6 @@
 import type { RuleDefinition } from '../rules/RuleDefinition';
 import { ruleTokens } from '../rules/RuleParser';
+import { sfx } from './Sfx';
 
 // DOM rule bar ("YOU [DIE] ON RED") + the small replace-word popup.
 // A level may have several editable words ("slots"); each is clickable.
@@ -63,7 +64,7 @@ export class RuleEditor {
           if (first) { span.id = 'editable-word'; first = false; }
           if (i === changed) span.classList.add('changed');
           span.title = 'Click to rewrite this word';
-          span.addEventListener('click', () => this.open(i));
+          span.addEventListener('click', () => { sfx.click(); this.open(i); });
           if (popSlots.includes(i)) span.classList.add('pop');
         }
         line.appendChild(span);
