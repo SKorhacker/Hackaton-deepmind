@@ -40,8 +40,10 @@ export default defineLevel({
 ## Several editable words
 
 A level may let players rewrite more than one word — in the same rule with `editableParts`, or in
-several rules. Each word is clicked and rewritten on its own, and a solution is then one word per
-editable word, in reading order (see `06-two-words.ts`):
+several rules. **The ONE WORD rule still applies:** only one word may differ from the original at a
+time (rewriting another one restores the first). Raise it with `maxChanges` when a level needs
+several words changed together. A solution is one word per editable word, in reading order
+(see `08-two-words.ts`):
 
 ```ts
 rules: [
@@ -57,11 +59,30 @@ rules: [
     editablePart: 'verb', allowedReplacements: ['CHASE', 'HELP'],
   },
 ],
-solutions: [['HIDE', 'ON_RED', 'HELP']],
+solutions: [['HIDE', 'ON_RED', 'HELP']],   // two words differ from the original...
+maxChanges: 2,                               // ...so this level must allow two changes
 ```
 
 `npm test` brute-forces every combination, so keep the allowed lists short (at most 512
 combinations).
+
+## Other level options
+
+```ts
+intro: 'Blue is ice.',   // a short line shown when the level starts
+timed: true,             // hard levels: see below
+maxChanges: 2,           // how many words may differ at once (default 1)
+tutorial: true,          // level-1 style "CLICK THIS WORD" prompts
+```
+
+**Timed levels.** Rewrites take effect the moment you make them — a guard standing on a tile that
+just became deadly dies on the spot — so in some puzzles *when* you change a word is the solution.
+Mark such a level `timed: true` and leave `solutions: []`: `npm test` then checks that **no** word
+typed at the start solves it, and that a solution rewriting words mid-level **does** exist (see
+`06-island.ts` and `07-trap.ts`).
+
+Subjects can be `YOU`, `GUARD` or `EVERYONE` (`EVERYONE DIES ON RED`); a rule naming `YOU` or
+`GUARD` directly wins over an `EVERYONE` rule for that actor.
 
 Map legend: `#` wall · `.` floor · `R` red · `B` blue · `E` exit · `_` pressure plate ·
 `P` player · `G` guard · `K` key · `D` door. Rows must all be the same length. Every door opens
