@@ -53,6 +53,11 @@ export class WordBook {
     return true;
   }
 
+  /** Unlocked words, newest first — the phone layout has no panel, so they surface as chips. */
+  words(): string[] {
+    return [...this.entries].reverse().map((e) => e.word);
+  }
+
   render() {
     const n = this.entries.length;
     this.tip.hidden = true;
