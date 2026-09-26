@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ONE WORD</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%2314121c'/><rect x='3' y='5' width='10' height='6' rx='1' fill='none' stroke='%23ffd166' stroke-width='1.5'/></svg>" />
+</head>
+<body class="in-menu">
+  <div id="app">
+    <header id="rulebar">
+      <div class="rule-label">RULE</div>
+      <div id="rules"></div>
+      <div id="tutorial-tip" hidden>CLICK THIS WORD</div>
+    </header>
+
+    <main id="game"></main>
+
+    <footer id="statusbar">
+      <span id="level-name"></span>
+      <span class="stat">TIME <b id="stat-time">00:00</b></span>
+      <span class="stat">WORDS <b id="stat-words">0</b></span>
+      <span class="stat">DEATHS <b id="stat-deaths">0</b></span>
+      <span class="spacer"></span>
+      <span class="keys">WASD / ARROWS move · SPACE wait</span>
+      <button id="btn-menu" class="ghost">MENU</button>
+      <button id="btn-restart">↻ RESTART <kbd>R</kbd></button>
+    </footer>
+  </div>
+
+  <div id="editor" class="panel" hidden>
+    <div class="editor-title">Replace <span id="editor-old"></span> with:</div>
+    <form id="editor-form" autocomplete="off">
+      <input id="editor-input" type="text" maxlength="24" spellcheck="false" placeholder="type one word" />
+      <div class="editor-buttons">
+        <button type="submit" id="editor-apply">APPLY</button>
+        <button type="button" id="editor-cancel" class="ghost">CANCEL</button>
+      </div>
+    </form>
+    <div id="editor-msg"></div>
+    <div id="editor-hint"></div>
+  </div>
+
+  <div id="complete" class="overlay" hidden>
+    <div class="panel complete-panel">
+      <div id="complete-title">LEVEL COMPLETE</div>
+      <div id="complete-rule"></div>
+      <div id="complete-new" hidden>✦ SOLUTION DISCOVERED ✦</div>
+      <table id="complete-stats"></table>
+      <div id="complete-solutions"></div>
+      <div class="complete-buttons">
+        <button id="btn-replay" class="ghost">TRY ANOTHER WORD</button>
+        <button id="btn-next">NEXT LEVEL →</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>
