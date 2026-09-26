@@ -104,8 +104,9 @@ Click **MAKE A LEVEL** on the title screen to open the Studio, a visual level ed
    an unsolvable level can't be saved.
 4. **SAVE** writes the level as one small file into `one-word/src/levels/definitions/`, and it appears in the
    game immediately. There is no list to register it in.
+   
+<img width="3810" height="1754" alt="image" src="https://github.com/user-attachments/assets/8e628bb7-db4f-4e97-ae7f-a75ac19a7184" />
 
-![Uploading image.png…]()
 
 
 ### Built for a community
