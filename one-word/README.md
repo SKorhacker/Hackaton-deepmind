@@ -11,10 +11,17 @@ replacement (`hide`), and the world obeys the new sentence. Reach the exit.
 npm install
 npm run dev      # http://localhost:5173
 npm run build    # static build in dist/ (works on any static host / Hugging Face Spaces)
+npm run itch     # build + one-word-itch.zip, ready to upload to itch.io
 npm test         # brute-force solver: proves which words solve each level
 ```
 
-Controls: **WASD / arrows** move · **Space** wait · **Enter / E** edit the word · **R** restart · **Esc** menu · **`** debug overlay.
+Desktop: **WASD / arrows** move · **Space** wait · **Enter / E** edit the word · **R** restart · **Esc** menu · **`** debug overlay.
+
+Touch: **swipe** or **tap a tile** to move · **tap yourself** to wait · **tap the highlighted word** to rewrite it ·
+the **✛** button in the status bar toggles an on-screen D-pad (on by default on touch devices).
+
+One build serves both: the canvas resizes to the window and the camera fits the grid, so portrait phones,
+landscape phones and desktop all work without a separate mobile version.
 
 ## How words become mechanics
 
@@ -56,8 +63,8 @@ The sixteen shipped mechanics are written in the same DSL (`src/rules/builtinSpe
 - **Dev:** `cp .env.example .env.local` and set `VITE_GEMINI_API_KEY` ([Google AI Studio](https://aistudio.google.com/apikey)).
   `.env.local` is gitignored and only read in dev mode. `npm run build` never includes it
   (`tools/check-no-keys.mjs` fails the build if a key shows up in `dist/`).
-- **Deployed build:** click "AI interpreter: OFF" on the title screen and paste a key. It stays in that browser's
-  localStorage. (For a public demo, a small proxy server is the safer option.)
+- **Deployed build:** tap or click "AI: OFF" in the corner of the title screen and paste a key. It stays in that
+  browser's localStorage. (For a public demo, a small proxy server is the safer option.)
 - Model: `VITE_GEMINI_MODEL` (default `gemini-3.8-flash`).
 
 ## The words
@@ -85,6 +92,31 @@ guards act on verbs like `GUARD HELPS YOU`. About 190 dictionary words map onto 
 
 **Word book.** A word you win a level with is *unlocked* and joins the WORDS panel beside the grid; hover it to
 see what it did, click it to reuse it.
+
+## Publishing to itch.io
+
+```bash
+npm run itch     # -> one-word-itch.zip (index.html at the zip root, relative asset paths)
+```
+
+On the itch.io project page:
+
+- Kind of project: **HTML**, upload the zip, tick **This file will be played in the browser**.
+- Embed size: **960 × 640** (any size works; the game fills whatever it is given).
+- Tick **Mobile friendly** (and *Automatically start on page load* if you want it to boot without a click).
+- Tick **Fullscreen button** — on iOS Safari the in-game ⛶ button is a no-op (Apple only allows fullscreen video),
+  so itch's own button plus "Add to Home Screen" is the way to get a full screen there.
+
+No art files are needed: everything on screen is drawn procedurally by Phaser. The only images itch asks for
+are store-page assets (cover image 630 × 500, screenshots).
+
+## Mobile notes
+
+- The layout uses the *visual* viewport height, so the collapsing browser chrome and the virtual keyboard
+  never push the grid off screen (`src/ui/Device.ts`).
+- The rewrite popup becomes a bottom sheet under 720px wide and rides above the keyboard; it also offers
+  one-tap word chips (the level's example words, plus words you already used) so playing without typing works.
+- The input font is 16px on phones on purpose: anything smaller makes iOS Safari zoom the page on focus.
 
 ## Levels
 
@@ -147,4 +179,4 @@ See `src/levels/definitions/README.md` for the level format, the map legend and 
 - `src/systems/Solver.ts`: brute-force solver, used by `npm test` and the editor's TEST LEVEL
 - `src/editor/` + `editor.html`: visual level editor; `tools/levelWriterPlugin.ts` writes the file in dev
 - `src/scenes/`: Phaser menu + game rendering
-- `src/ui/`: DOM rule editor, level-complete card, sound
+- `src/ui/`: DOM rule editor, level-complete card, sound, touch pad, viewport/device helpers

@@ -16,6 +16,8 @@ import { RuleEditor } from '../ui/RuleEditor';
 import { LevelCompleteUI } from '../ui/LevelCompleteUI';
 import { WordBook } from '../ui/WordBook';
 import { sfx } from '../ui/Sfx';
+import { TouchPad } from '../ui/TouchPad';
+import { fullscreenSupported, isTouch, toggleFullscreen } from '../ui/Device';
 import { fmtTime, foundFor, session } from '../config/Session';
 
 const FONT = '"Space Mono", monospace';
@@ -23,7 +25,15 @@ const FONT = '"Space Mono", monospace';
 // DOM widgets live for the whole page; scenes just rebind their callbacks.
 let editor: RuleEditor;
 let complete: LevelCompleteUI;
+let pad: TouchPad;
 let wordbook: WordBook;
+
+/** Empty space kept around the grid, in world pixels, so the camera never crops it. */
+const FIT_MARGIN = 24;
+/** Below this the camera would shrink the grid past readability; the view scrolls instead. */
+const MIN_ZOOM = 0.34;
+/** A pointer that travels further than this is a swipe, not a tap. */
+const SWIPE_PX = 26;
 
 // A tile and a guard are drawn from the mechanic's spec, so a word invented
 // mid-game looks like something even though nobody drew it.
@@ -72,7 +82,7 @@ export class GameScene extends Phaser.Scene {
   private world!: World;
   private rules!: RuleManager;
 
-  /** Tile size for this level (shrinks for big maps so they fit the canvas). */
+  /** Tile size in world pixels; the camera, not the tile, adapts to the viewport. */
   private ts = TILE;
   private ox = 0;
   private oy = 0;
@@ -87,7 +97,7 @@ export class GameScene extends Phaser.Scene {
   private overlay!: Phaser.GameObjects.Graphics;
   private debugGfx!: Phaser.GameObjects.Graphics;
   private debugText: Phaser.GameObjects.Text[] = [];
-  private aiNote!: Phaser.GameObjects.Text;
+  private down: { x: number; y: number; wx: number; wy: number } | null = null;
 
   private locked = false;
   private debug = DEBUG_MODE;
@@ -100,6 +110,7 @@ export class GameScene extends Phaser.Scene {
   /** Slot last opened/rewritten — the word book fills this one. */
   private lastSlot = -1;
   private onKey = (e: KeyboardEvent) => this.handleKey(e);
+  private onResize = () => this.layout();
 
   constructor() { super('game'); }
 
@@ -116,9 +127,11 @@ export class GameScene extends Phaser.Scene {
     document.body.classList.remove('in-menu');
     editor ??= new RuleEditor();
     complete ??= new LevelCompleteUI();
+    pad ??= new TouchPad();
     wordbook ??= new WordBook();
     complete.hide();
     editor.close();
+    pad.onDir = (dir) => this.turn(dir);
 
     const ai = aiProvider();
     this.rules = new RuleManager(
@@ -129,16 +142,19 @@ export class GameScene extends Phaser.Scene {
     );
     this.world = new World(this.level, this.rules.rules);
 
-    const { width: W, height: H } = this.scale;
-    this.ts = Math.min(TILE, Math.floor(W / this.level.width), Math.floor((H - 8) / this.level.height));
-    this.ox = Math.round((W - this.level.width * this.ts) / 2);
-    this.oy = Math.round((H - this.level.height * this.ts) / 2);
+    // The level is drawn at full tile size from (0,0); the camera zooms to fit it, so big
+    // maps no longer need a smaller tile.
+    this.ts = TILE;
+    this.ox = 0;
+    this.oy = 0;
 
     this.drawTiles();
     this.overlay = this.add.graphics().setDepth(2);
     this.createEntities();
     this.debugGfx = this.add.graphics().setDepth(50);
-    this.aiNote = this.add.text(W / 2, H - 8, '', { fontFamily: FONT, fontSize: '13px', color: '#8a85a0' }).setOrigin(0.5, 1).setDepth(40);
+    this.setAiNote('');
+    this.layout();
+    this.bindPointer();
 
     // Bind DOM UI to this level.
     editor.onSubmit = (raw, slot) => this.submitWord(raw, slot);
@@ -150,22 +166,23 @@ export class GameScene extends Phaser.Scene {
     wordbook.onPick = (w) => editor.open(Math.max(0, this.lastSlot), w);
     wordbook.render();
     editor.setTutorial(this.level.tutorial && !session.tutorialDone ? 'click' : null);
+    editor.setSuggestions([...(this.level.hintWords ?? []), ...wordbook.words()]);
+    document.querySelector('.keys')!.textContent = isTouch()
+      ? 'SWIPE or TAP a tile to move · TAP the rule word'
+      : 'WASD / ARROWS move · SPACE wait';
     document.getElementById('level-name')!.textContent = `LEVEL ${this.level.id} · ${this.level.name}`;
     (document.getElementById('btn-restart') as HTMLButtonElement).onclick = () => this.restart();
     (document.getElementById('btn-menu') as HTMLButtonElement).onclick = () => this.toMenu();
+    const fs = document.getElementById('btn-fullscreen') as HTMLButtonElement;
+    fs.hidden = !fullscreenSupported();
+    fs.onclick = () => void toggleFullscreen();
 
     window.addEventListener('keydown', this.onKey);
-    this.events.once('shutdown', () => window.removeEventListener('keydown', this.onKey));
-
-    // Clicking a neighbouring tile moves there (clicking yourself waits), so the
-    // game is playable when the keyboard goes elsewhere — an embedded viewer, a
-    // touch screen, or right after typing a word.
-    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
-      if (editor.isOpen || complete.isOpen) return;
-      const dx = Math.floor((p.worldX - this.ox) / this.ts) - this.world.s.player.x;
-      const dy = Math.floor((p.worldY - this.oy) / this.ts) - this.world.s.player.y;
-      if (dx === 0 && dy === 0) this.turn(null);
-      else if (Math.abs(dx) + Math.abs(dy) === 1) this.turn({ x: dx, y: dy });
+    this.scale.on('resize', this.onResize);
+    this.events.once('shutdown', () => {
+      window.removeEventListener('keydown', this.onKey);
+      this.scale.off('resize', this.onResize);
+      this.setAiNote('');
     });
 
     this.startTime = this.time.now;
@@ -177,6 +194,26 @@ export class GameScene extends Phaser.Scene {
 
   update() {
     if (!this.finished) this.updateStats();
+  }
+
+  // ---------------- layout ----------------
+
+  /** Fit the whole grid on screen, whatever the shape of the viewport. */
+  private layout() {
+    const { width: W, height: H } = this.scale;
+    if (!W || !H) return;
+    const worldW = this.level.width * TILE + FIT_MARGIN * 2;
+    const worldH = this.level.height * TILE + FIT_MARGIN * 2;
+    const zoom = Math.max(MIN_ZOOM, Math.min(W / worldW, H / worldH, 1.6));
+    const cam = this.cameras.main;
+    cam.setZoom(zoom);
+    cam.centerOn((this.level.width * TILE) / 2, (this.level.height * TILE) / 2);
+  }
+
+  private setAiNote(text: string) {
+    const el = document.getElementById('ai-note')!;
+    el.textContent = text;
+    el.classList.toggle('show', text !== '');
   }
 
   // ---------------- drawing ----------------
@@ -381,6 +418,42 @@ export class GameScene extends Phaser.Scene {
 
   // ---------------- input & turns ----------------
 
+  /** Touch/mouse play: swipe in a direction, tap a neighbouring tile, tap yourself to wait. */
+  private bindPointer() {
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
+      this.down = { x: p.x, y: p.y, wx: p.worldX, wy: p.worldY };
+    });
+    this.input.on('pointerup', (p: Phaser.Input.Pointer) => {
+      const d = this.down;
+      this.down = null;
+      if (!d || editor.isOpen || complete.isOpen) return;
+      const dx = p.x - d.x, dy = p.y - d.y;
+      if (Math.hypot(dx, dy) >= SWIPE_PX) {
+        this.turn(Math.abs(dx) > Math.abs(dy) ? { x: Math.sign(dx), y: 0 } : { x: 0, y: Math.sign(dy) });
+        return;
+      }
+      this.tapTile(d.wx, d.wy);
+    });
+  }
+
+  /** A tap moves one step towards the tile under the finger (tapping yourself waits). */
+  private tapTile(worldX: number, worldY: number) {
+    const tx = Math.floor((worldX - this.ox) / TILE);
+    const ty = Math.floor((worldY - this.oy) / TILE);
+    if (tx < 0 || ty < 0 || tx >= this.level.width || ty >= this.level.height) return;
+    const p = this.world.s.player;
+    const dx = tx - p.x, dy = ty - p.y;
+    if (!dx && !dy) { this.turn(null); return; }
+    const horizontal: Pos = { x: Math.sign(dx), y: 0 };
+    const vertical: Pos = { x: 0, y: Math.sign(dy) };
+    const order = Math.abs(dx) > Math.abs(dy) ? [horizontal, vertical] : [vertical, horizontal];
+    for (const dir of order) {
+      if (!dir.x && !dir.y) continue;
+      if (this.world.tile(p.x + dir.x, p.y + dir.y) !== T.WALL) { this.turn(dir); return; }
+    }
+    sfx.bump();
+  }
+
   private handleKey(e: KeyboardEvent) {
     if (editor.isOpen || (e.target as HTMLElement)?.tagName === 'INPUT') return;
     if (complete.isOpen) return;
@@ -532,7 +605,7 @@ export class GameScene extends Phaser.Scene {
   private restart() {
     complete.hide();
     editor.close();
-    this.aiNote.setText('');
+    this.setAiNote('');
     this.cameras.main.flash(120, 20, 18, 28);
     this.resetWorld(true);
   }
@@ -578,6 +651,7 @@ export class GameScene extends Phaser.Scene {
     // ONE WORD: rewriting this slot restores the oldest rewritten one if over the level's limit.
     this.activeWord = { word: normalizeWord(raw) ?? raw.trim(), token: res.token, ai: res.source === 'ai' };
     this.lastSlot = slot;
+    editor.rememberWord(raw);
     const restored = this.rules.apply(slot, res.token);
     void editor.playRewrite(this.rules.rules, this.rules.slots, this.rules.changedSlots, [slot, ...restored]);
     const ev = this.world.setRules(this.rules.rules);
@@ -585,12 +659,9 @@ export class GameScene extends Phaser.Scene {
     this.effects(ev);
     this.sync(true);
     if (this.world.s.dead) this.time.delayedCall(250, () => this.onDeath());
-    if (res.source === 'ai') {
-      this.aiNote.setText(`AI understood "${raw.trim().toLowerCase()}" as ${res.token}${res.note ? ` — ${res.note}` : ''}`).setAlpha(1);
-      this.tweens.add({ targets: this.aiNote, alpha: 0.6, delay: 3000, duration: 800 });
-    } else {
-      this.aiNote.setText('');
-    }
+    this.setAiNote(res.source === 'ai'
+      ? `AI understood "${raw.trim().toLowerCase()}" as ${res.token}${res.note ? ` — ${res.note}` : ''}`
+      : '');
     if (this.level.tutorial && !session.tutorialDone) {
       session.tutorialDone = true;
       editor.setTutorial(null);
