@@ -8,7 +8,7 @@ export interface RuleToken {
   editable: boolean;
 }
 
-const INTRANSITIVE: Mechanic[] = ['SLEEP', 'FREEZE', 'DIE', 'HIDE', 'HEAL', 'BOUNCE', 'OPEN'];
+const INTRANSITIVE: Mechanic[] = ['SLEEP', 'FREEZE', 'DIE', 'HIDE', 'HEAL', 'BOUNCE', 'OPEN', 'SLIDE', 'TELEPORT'];
 
 export function conjugate(verb: Mechanic, subject: string): string {
   if (subject === 'YOU') return verb;

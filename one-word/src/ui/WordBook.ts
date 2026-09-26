@@ -5,6 +5,8 @@ const MEANING: Record<string, string> = {
   FREEZE: 'stops in place', FOLLOW: 'trails behind', CHASE: 'hunts it down', FLEE: 'runs away',
   HELP: 'holds plates for you', SLEEP: 'dozes off', OPEN: 'swings open', ATTACK: 'strikes',
   EVERYONE: 'the player and guards', YOU: 'the player', GUARD: 'the guard', KEY: 'the key', EXIT: 'the way out', RED: 'red tiles',
+  SLIDE: 'slides until something stops it', TELEPORT: 'jumps to the next tile of the same colour',
+  PUSH: 'shoves one tile', SWAP: 'trades places',
   BLUE: 'blue tiles', PLATE: 'pressure plates', DOOR: 'the door',
 };
 
