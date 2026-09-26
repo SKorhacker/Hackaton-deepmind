@@ -17,7 +17,13 @@
       <div id="tutorial-tip" hidden>CLICK THIS WORD</div>
     </header>
 
-    <main id="game"></main>
+    <div id="middle">
+      <main id="game"></main>
+      <aside id="wordbook">
+        <div class="wb-head"><span>WORDS</span><span id="wb-count"></span></div>
+        <div id="wb-list"></div>
+      </aside>
+    </div>
 
     <footer id="statusbar">
       <span id="level-name"></span>
@@ -42,6 +48,7 @@
     </form>
     <div id="editor-msg"></div>
     <div id="editor-hint"></div>
+    </div>
   </div>
 
   <div id="complete" class="overlay" hidden>

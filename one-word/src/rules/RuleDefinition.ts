@@ -7,7 +7,7 @@ export const MECHANICS = [
 ] as const;
 export type Mechanic = (typeof MECHANICS)[number];
 
-export const NOUNS = ['YOU', 'GUARD', 'KEY', 'EXIT', 'RED', 'BLUE', 'PLATE', 'DOOR'] as const;
+export const NOUNS = ['YOU', 'GUARD', 'EVERYONE', 'KEY', 'EXIT', 'RED', 'BLUE', 'PLATE', 'DOOR'] as const;
 export type Noun = (typeof NOUNS)[number];
 
 export type Condition = 'ON_RED' | 'ON_BLUE' | 'NEAR_YOU';
@@ -20,7 +20,8 @@ export interface RuleDefinition {
   object?: Noun;
   condition?: Condition;
 
-  /** Omitted for fixed rules. A level has exactly one editable word. */
+  /** Omitted for fixed rules. Levels may have several editable words, but only
+   *  one word may differ from the original sentence set at any moment. */
   editablePart?: RulePart;
   /** Tokens (mechanics or nouns) the editable word may become. */
   allowedReplacements?: string[];

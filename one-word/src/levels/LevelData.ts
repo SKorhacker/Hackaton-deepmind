@@ -34,6 +34,10 @@ export interface LevelData {
   /** Example words shown when the player types something the world doesn't understand. */
   hintWords?: string[];
   tutorial?: boolean;
+  /** Hard levels: no word works if typed at the start — you must rewrite at the right moment. */
+  timed?: boolean;
+  /** Short line shown when the level starts. */
+  intro?: string;
 }
 
 // Map legend:
