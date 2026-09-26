@@ -37,6 +37,7 @@ interface Draft {
   cells: string[][];
   rules: RuleDefinition[];
   solutions: string[][] | null;
+  maxChanges?: number;
   saved?: { path: string; rank: number };
 }
 
@@ -57,6 +58,7 @@ function vocabulary(part: RulePart): readonly string[] {
 export class LevelEditor {
   private name = 'MY LEVEL';
   private rank = nextFreeRank();
+  private maxChanges = 1;
   private cells: string[][] = STARTER_MAP.map((row) => [...row]);
   private rules: RuleDefinition[] = [{
     subject: 'YOU', verb: 'DIE', condition: 'ON_RED',
@@ -81,6 +83,7 @@ export class LevelEditor {
       this.cells = draft.cells;
       this.rules = draft.rules;
       this.solutions = draft.solutions;
+      this.maxChanges = draft.maxChanges ?? 1;
     }
     this.build();
     this.renderPalette();
@@ -88,7 +91,7 @@ export class LevelEditor {
     this.renderRules();
     this.renderSource();
     if (draft?.saved) this.announceSaved(draft.saved.path, draft.saved.rank);
-    document.addEventListener('mouseup', () => { this.painting = false; });
+    document.addEventListener('pointerup', () => { this.painting = false; });
   }
 
   // ---------- layout ----------
@@ -105,6 +108,10 @@ export class LevelEditor {
     rankInput.addEventListener('input', () => {
       this.rank = Math.max(1, Number(rankInput.value) || 1);
       this.renderSource();
+    });
+
+    const changes = select(['1', '2', '3', '4'], String(this.maxChanges), value => {
+      this.maxChanges = Number(value); this.invalidate();
     });
 
     const size = el('div', { className: 'size-controls' }, [
@@ -138,7 +145,7 @@ export class LevelEditor {
         ]),
         el('section', { className: 'pane' }, [
           el('h2', { textContent: 'LEVEL' }),
-          el('div', { className: 'fields' }, [field('NAME', nameInput), field('NUMBER', rankInput)]),
+          el('div', { className: 'fields' }, [field('NAME', nameInput), field('NUMBER', rankInput), field('WORDS CHANGED AT ONCE', changes)]),
           this.rulePane,
           el('div', { className: 'actions' }, [verify, save]),
           this.statusLine,
@@ -164,7 +171,8 @@ export class LevelEditor {
         el('span', { className: 'swatch' }),
         el('span', { textContent: b.label }),
       ]);
-      (swatch.firstElementChild as HTMLElement).style.background = b.color;
+      this.paintArt(swatch.firstElementChild as HTMLElement, b.char);
+      swatch.setAttribute('aria-label', b.label);
       swatch.addEventListener('click', () => { this.brush = b.char; this.renderPalette(); });
       return swatch;
     }));
@@ -175,19 +183,41 @@ export class LevelEditor {
     grid.style.gridTemplateColumns = `repeat(${this.cells[0].length}, 1fr)`;
     this.cells.forEach((row, y) => row.forEach((char, x) => {
       const cell = el('button', { className: 'cell', title: `${x},${y}` });
-      const brush = BRUSH_BY_CHAR.get(char);
-      cell.style.background = brush?.color ?? '#221f2e';
-      if ('PGKD'.includes(char)) {
-        cell.style.background = '#221f2e';
-        const token = el('span', { className: 'token', textContent: char });
-        token.style.background = brush?.color ?? '#fff';
-        cell.append(token);
-      }
-      cell.addEventListener('mousedown', () => { this.painting = true; this.paint(x, y); });
-      cell.addEventListener('mouseenter', () => { if (this.painting) this.paint(x, y); });
+      this.paintArt(cell, char);
+      cell.setAttribute('aria-label', `${BRUSH_BY_CHAR.get(char)?.label ?? char} at ${x}, ${y}`);
+      let touchStart: { x: number; y: number } | null = null;
+      cell.addEventListener('pointerdown', e => {
+        if (e.pointerType === 'touch') { touchStart = { x: e.clientX, y: e.clientY }; return; }
+        e.preventDefault(); this.painting = true; this.paint(x, y);
+      });
+      cell.addEventListener('pointercancel', () => { touchStart = null; });
+      cell.addEventListener('pointerup', e => {
+        if (touchStart && Math.hypot(e.clientX - touchStart.x, e.clientY - touchStart.y) < 10) this.paint(x, y);
+        touchStart = null;
+      });
+      cell.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.paint(x, y); } });
+      cell.addEventListener('pointerenter', e => { if (this.painting && e.buttons) this.paint(x, y); });
       grid.append(cell);
     }));
     this.gridPane.replaceChildren(grid);
+  }
+
+  private paintArt(node: HTMLElement, char: string) {
+    const base = `${import.meta.env.BASE_URL}art/runtime/`;
+    const tile = ({ '.': 'floor', '#': 'wall', R: 'red', B: 'blue' } as Record<string, string>)[char];
+    node.style.backgroundColor = '#182b34';
+    if (tile) {
+      node.style.backgroundImage = `url("${base}${tile}.webp")`;
+      node.style.backgroundSize = '100% 100%';
+    } else {
+      node.style.backgroundImage = `url("${base}floor.webp")`;
+      node.style.backgroundSize = '100% 100%';
+      const art = el('span', { className: 'tile-art' });
+      const name = ({ E: 'exit', _: 'plate', P: 'wanderer-walk', G: 'sentinel-states', K: 'key', D: 'door' } as Record<string, string>)[char];
+      art.style.backgroundImage = `url("${base}${name}.png")`;
+      art.style.backgroundSize = char === 'G' ? '400% 100%' : char === 'P' ? '400% 400%' : 'contain';
+      node.append(art);
+    }
   }
 
   private paint(x: number, y: number) {
@@ -326,6 +356,7 @@ export class LevelEditor {
       map: this.cells.map((row) => row.join('')),
       rules: this.rules,
       solutions: this.solutions ?? [],
+      maxChanges: this.maxChanges,
     };
   }
 
@@ -360,7 +391,7 @@ export class LevelEditor {
 
   private storeDraft(saved?: { path: string; rank: number }) {
     const draft: Draft = {
-      name: this.name, rank: this.rank, cells: this.cells, rules: this.rules, solutions: this.solutions, saved,
+      name: this.name, rank: this.rank, cells: this.cells, rules: this.rules, solutions: this.solutions, maxChanges: this.maxChanges, saved,
     };
     try {
       sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
@@ -369,7 +400,7 @@ export class LevelEditor {
 
   private announceSaved(path: string, rank: number) {
     this.setStatus(`Wrote ${path} — it is now level ${rank}.`, 'ok');
-    const play = el('a', { href: './index.html', textContent: `PLAY LEVEL ${rank} →` });
+    const play = el('a', { href: `./index.html?level=${rank}`, textContent: `PLAY LEVEL ${rank} →` });
     this.statusLine.append(' ', play);
   }
 

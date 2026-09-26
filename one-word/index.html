@@ -2,40 +2,45 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-  <meta name="mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <meta name="theme-color" content="#14121c" />
-  <title>ONE WORD</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>ONE WORD — The Living Manuscript</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='3' fill='%2314121c'/><rect x='3' y='5' width='10' height='6' rx='1' fill='none' stroke='%23ffd166' stroke-width='1.5'/></svg>" />
 </head>
 <body class="in-menu">
+  <section id="rotate-screen" hidden role="dialog" aria-modal="true" aria-labelledby="rotate-title">
+    <div class="rotate-phone" aria-hidden="true">↻</div>
+    <p class="mobile-eyebrow">THE LIVING MANUSCRIPT</p>
+    <h1 id="rotate-title">Turn the page sideways</h1>
+    <p>Rotate your phone to landscape to play.</p>
+    <p class="rotate-note">Your chapter will wait right here.</p>
+  </section>
   <div id="app">
     <header id="rulebar">
-      <div class="rule-label">RULE</div>
+      <div class="rule-label">REWRITE THE MANUSCRIPT</div>
       <div id="rules"></div>
+      <div id="chapter-note"></div>
       <div id="tutorial-tip" hidden>CLICK THIS WORD</div>
     </header>
 
-    <div id="middle">
-      <main id="game">
-        <div id="ai-note"></div>
-        <div id="pad" hidden>
-          <button class="pad-btn" data-dir="up" aria-label="move up">▲</button>
-          <button class="pad-btn" data-dir="left" aria-label="move left">◀</button>
-          <button class="pad-btn" data-dir="wait" aria-label="wait a turn">•</button>
-          <button class="pad-btn" data-dir="right" aria-label="move right">▶</button>
-          <button class="pad-btn" data-dir="down" aria-label="move down">▼</button>
-        </div>
-      </main>
-      <aside id="wordbook">
-        <div class="wb-head"><span>WORDS</span><span id="wb-count"></span></div>
-        <div id="wb-list"></div>
-      </aside>
+    <div id="play-area">
+    <main id="game">
+      <nav id="mobile-menu" aria-label="Story menu"></nav>
+      <div id="pad" hidden aria-label="Movement controls">
+        <button class="pad-btn" data-dir="up" aria-label="move up">▲</button>
+        <button class="pad-btn" data-dir="left" aria-label="move left">◀</button>
+        <button class="pad-btn" data-dir="wait" aria-label="wait a turn">•</button>
+        <button class="pad-btn" data-dir="right" aria-label="move right">▶</button>
+        <button class="pad-btn" data-dir="down" aria-label="move down">▼</button>
+      </div>
+    </main>
+    <aside id="wordbook" aria-label="Unlocked words">
+      <h2>YOUR WORDS <span id="wb-count">0</span></h2>
+      <p id="wb-chapter"></p>
+      <div id="wb-list"></div>
+    </aside>
     </div>
 
     <footer id="statusbar">
@@ -44,19 +49,18 @@
       <span class="stat">WORDS <b id="stat-words">0</b></span>
       <span class="stat">DEATHS <b id="stat-deaths">0</b></span>
       <span class="spacer"></span>
-      <span class="keys">WASD / ARROWS or CLICK a tile · SPACE wait</span>
-      <button id="btn-pad" class="ghost icon" title="Toggle the on-screen pad" aria-label="toggle on-screen pad">✛</button>
-      <button id="btn-fullscreen" class="ghost icon" title="Fullscreen" aria-label="fullscreen">⛶</button>
+      <span class="keys">WASD / ARROWS move · SPACE wait</span>
+      <button id="btn-pad" class="ghost icon" aria-label="toggle on-screen pad">✛</button>
+      <button id="btn-fullscreen" class="ghost icon" aria-label="fullscreen">⛶</button>
       <button id="btn-menu" class="ghost">MENU</button>
-      <button id="btn-restart">↻ <span class="btn-label">RESTART</span><kbd>R</kbd></button>
+      <button id="btn-restart">↻ RESTART <kbd>R</kbd></button>
     </footer>
   </div>
 
   <div id="editor" class="panel" hidden>
     <div class="editor-title">Replace <span id="editor-old"></span> with:</div>
     <form id="editor-form" autocomplete="off">
-      <input id="editor-input" type="text" maxlength="24" spellcheck="false" autocapitalize="off"
-             autocorrect="off" autocomplete="off" enterkeyhint="go" placeholder="type one word" />
+      <input id="editor-input" type="text" maxlength="24" spellcheck="false" autocapitalize="off" autocorrect="off" enterkeyhint="go" placeholder="type one word" />
       <div id="editor-chips"></div>
       <div class="editor-buttons">
         <button type="submit" id="editor-apply">APPLY</button>
@@ -65,11 +69,11 @@
     </form>
     <div id="editor-msg"></div>
     <div id="editor-hint"></div>
-    </div>
   </div>
 
   <div id="complete" class="overlay" hidden>
-    <div class="panel complete-panel">
+    <div class="panel complete-panel" role="dialog" aria-modal="true" aria-labelledby="complete-title">
+      <div class="chapter-seal" aria-hidden="true">✦</div>
       <div id="complete-title">LEVEL COMPLETE</div>
       <div id="complete-rule"></div>
       <div id="complete-new" hidden>✦ SOLUTION DISCOVERED ✦</div>
@@ -81,6 +85,8 @@
       </div>
     </div>
   </div>
+
+  <button id="btn-sound" type="button" aria-label="Mute">♪</button>
 
   <div id="toast"></div>
   <script type="module" src="/src/main.ts"></script>

@@ -38,5 +38,6 @@ export class TouchPad {
     this.el.hidden = !on;
     this.toggle.classList.toggle('on', on);
     document.body.classList.toggle('pad-on', on);
+    window.dispatchEvent(new Event('oneword-pad-resize'));
   }
 }

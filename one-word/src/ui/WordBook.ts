@@ -1,87 +1,75 @@
-// Side panel of words that solved a level (unlocked).
-// Meanings stay hidden until you hover a word. Kept in localStorage.
-
-interface Entry { word: string; token: string; ai: boolean; level?: number }
-
+import { sfx } from './Sfx';
+export interface WordEntry { word: string; token: string; ai: boolean; level?: number; levels: number[] }
 const MEANING: Record<string, string> = {
   DIE: 'is destroyed', HIDE: 'turns invisible', HEAL: 'is restored', BOUNCE: 'gets launched onward',
   FREEZE: 'stops in place', FOLLOW: 'trails behind', CHASE: 'hunts it down', FLEE: 'runs away',
   HELP: 'holds plates for you', SLEEP: 'dozes off', OPEN: 'swings open', ATTACK: 'strikes',
+  EVERYONE: 'the player and guards', YOU: 'the player', GUARD: 'the guard', KEY: 'the key', EXIT: 'the way out', RED: 'red tiles',
   SLIDE: 'slides until something stops it', TELEPORT: 'jumps to the next tile of the same colour',
   PUSH: 'shoves one tile', SWAP: 'trades places',
-  YOU: 'the player', GUARD: 'the guard', KEY: 'the key', EXIT: 'the way out', RED: 'red tiles',
   BLUE: 'blue tiles', PLATE: 'pressure plates', DOOR: 'the door',
 };
+
 const STORE = 'oneword_unlocked_words';
-
-const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
-
 export class WordBook {
-  onPick: (word: string) => void = () => {};
-  private entries: Entry[] = [];
-  private fresh = '';
+  onPick: (word: string, token: string) => void = () => {};
+  private entries: WordEntry[] = [];
+  private allowed = new Set<string>();
+  private level = 0;
   private list = document.getElementById('wb-list')!;
   private count = document.getElementById('wb-count')!;
-  private tip = document.createElement('div');
 
   constructor() {
-    try { this.entries = JSON.parse(localStorage.getItem(STORE) ?? '[]'); } catch { this.entries = []; }
-    if (!Array.isArray(this.entries)) this.entries = [];
-    this.tip.id = 'wb-tip';
-    this.tip.hidden = true;
-    document.body.appendChild(this.tip);
-
-    this.list.addEventListener('click', (e) => {
-      const w = (e.target as HTMLElement).closest('.wb-word') as HTMLElement | null;
-      if (w?.dataset.word) this.onPick(w.dataset.word);
-    });
-    this.list.addEventListener('mouseover', (e) => {
-      const w = (e.target as HTMLElement).closest('.wb-word') as HTMLElement | null;
-      if (w) this.showTip(w);
-    });
-    this.list.addEventListener('mouseout', (e) => {
-      if ((e.target as HTMLElement).closest('.wb-word')) this.tip.hidden = true;
-    });
+    try {
+      const saved: unknown = JSON.parse(localStorage.getItem(STORE) ?? '[]');
+      if (Array.isArray(saved)) for (const item of saved) {
+        if (!item || typeof item.word !== 'string' || typeof item.token !== 'string') continue;
+        const levels = Array.isArray(item.levels) ? item.levels.filter((n: unknown) => typeof n === 'number' && Number.isInteger(n)) : Number.isInteger(item.level) ? [item.level] : [];
+        this.entries.push({ word: item.word, token: item.token, ai: !!item.ai, level: item.level, levels });
+      }
+    } catch { /* Storage is optional. */ }
   }
 
-  /** Unlock a word that solved a level. Returns true if it's new. */
-  add(word: string, token: string, ai: boolean, level?: number): boolean {
+  setLevel(level: number, allowed: string[]) {
+    this.level = level; this.allowed = new Set(allowed); this.render();
+  }
+
+  /** Called only when a chapter is completed. Preserve every chapter association. */
+  add(word: string, token: string, ai: boolean, level: number): boolean {
     word = word.trim().toLowerCase();
-    if (!word || this.entries.some((e) => e.word === word)) return false;
-    this.entries.push({ word, token, ai, level });
-    try { localStorage.setItem(STORE, JSON.stringify(this.entries)); } catch { /* storage blocked */ }
-    this.fresh = word;
+    if (!word) return false;
+    let entry = this.entries.find(e => e.word === word && e.token === token);
+    const fresh = !entry;
+    if (!entry) { entry = { word, token, ai, level, levels: [] }; this.entries.push(entry); }
+    if (!entry.levels.includes(level)) entry.levels.push(level);
+    try { localStorage.setItem(STORE, JSON.stringify(this.entries)); } catch { /* Session fallback. */ }
     this.render();
-    return true;
+    return fresh;
   }
 
-  /** Unlocked words, newest first — the phone layout has no panel, so they surface as chips. */
-  words(): string[] {
-    return [...this.entries].reverse().map((e) => e.word);
+  words(allowed: string[]): string[] {
+    return [...new Set([...this.entries].reverse().filter(e => allowed.includes(e.token)).map(e => e.word))];
   }
 
   render() {
-    const n = this.entries.length;
-    this.tip.hidden = true;
-    this.count.textContent = n ? String(n) : '';
-    this.list.innerHTML = n
-      ? `<div class="wb-words">${[...this.entries].reverse().map((e, i) =>
-          `<button type="button" class="wb-word ${e.ai ? 'ai' : ''} ${e.word === this.fresh ? 'new' : ''}" data-i="${n - 1 - i}" data-word="${esc(e.word)}">${esc(e.word)}</button>`).join('')}</div>`
-      : '';
-    this.fresh = '';
-  }
-
-  private showTip(el: HTMLElement) {
-    const e = this.entries[Number(el.dataset.i)];
-    if (!e) return;
-    this.tip.innerHTML =
-      `<div class="wb-tip-word">${esc(e.word.toUpperCase())} <span>→ ${e.token}</span></div>` +
-      `<div>${MEANING[e.token] ?? ''}</div>` +
-      `<div class="wb-tip-meta">${e.level ? `unlocked in level ${e.level}` : ''}${e.ai ? `${e.level ? ' · ' : ''}understood by AI ✦` : ''}</div>`;
-    this.tip.hidden = false;
-    const r = el.getBoundingClientRect();
-    const w = this.tip.offsetWidth;
-    this.tip.style.left = `${Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2))}px`;
-    this.tip.style.top = `${r.bottom + 8}px`;
+    const visible = [...this.entries].reverse().filter(e => this.allowed.has(e.token));
+    this.count.textContent = String(visible.length);
+    document.getElementById('wb-chapter')!.textContent = `For chapter ${this.level}`;
+    this.list.replaceChildren();
+    if (!visible.length) {
+      const empty = document.createElement('p'); empty.className = 'wb-empty';
+      empty.textContent = 'Complete chapters to collect words you can use here.'; this.list.append(empty); return;
+    }
+    for (const entry of visible) {
+      const button = document.createElement('button'); button.type = 'button'; button.className = 'wb-word';
+      button.dataset.word = entry.word; button.dataset.token = entry.token;
+      const name = document.createElement('strong'); name.textContent = entry.word.toUpperCase();
+      const meaning = document.createElement('small'); meaning.textContent = MEANING[entry.token] ?? entry.token;
+      const chapters = document.createElement('small'); chapters.className = 'wb-origin';
+      chapters.textContent = entry.levels.length ? `Completed in ${entry.levels.join(', ')}` : 'Previously discovered';
+      button.append(name, meaning, chapters);
+      button.addEventListener('click', () => { sfx.click(); this.onPick(entry.word, entry.token); });
+      this.list.append(button);
+    }
   }
 }

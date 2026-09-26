@@ -3,3 +3,4 @@ dist
 *.zip
 .env.local
 .env*.local
+one-word-itch.zip

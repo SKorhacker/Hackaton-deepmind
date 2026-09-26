@@ -113,3 +113,26 @@ button:hover { filter: brightness(1.15); }
   font-size: 11px; line-height: 1.5; max-height: 320px; overflow: auto; white-space: pre;
 }
 .source::before { content: attr(data-file); display: block; color: var(--accent); margin-bottom: 6px; }
+
+/* The maker previews the same runtime art without changing map symbols. */
+:root { --bg: #101d27; --panel: #182b34; --line: #45504c; --text: #f0e6cd; --dim: #aebbb6; --accent: #d6b575; --good: #8fcbb3; }
+.pane { min-width: 0; }
+.editor-header h1 { color: var(--accent); }
+.cell, .swatch { position: relative; }
+.tile-art { display: block; width: 100%; height: 100%; background-position: top left; background-repeat: no-repeat; pointer-events: none; }
+.swatch { width: 30px; height: 30px; flex-shrink: 0; }
+.brush { min-height: 44px; }
+.grid-pane { overflow: auto; }
+.grid { min-width: 440px; }
+.cell { touch-action: pan-x pan-y; min-width: 0; }
+.size-controls, .actions { flex-wrap: wrap; }
+@media (max-width: 720px) {
+  .editor-header { padding: 16px; }
+  .ghost-link { position: static; display: inline-block; padding: 14px 0 0; }
+  .editor-body { padding: 12px; gap: 12px; grid-template-columns: minmax(0, 1fr); }
+  .pane { padding: 12px; }
+  .field { max-width: 100%; }
+  .field input, .field select { max-width: 100%; font-size: 16px; min-height: 44px; }
+  .rule-sentence { overflow-wrap: anywhere; }
+  .chip, button.ghost, button.primary { min-height: 44px; }
+}

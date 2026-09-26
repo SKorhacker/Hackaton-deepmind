@@ -18,24 +18,13 @@ body {
   font-family: var(--font);
   overflow: hidden;
   user-select: none;
-  -webkit-user-select: none;
-  -webkit-tap-highlight-color: transparent;
-  overscroll-behavior: none;
-  touch-action: manipulation;
 }
 
-/* --vh is the *visual* viewport height (see ui/Device.ts): 100vh is wrong on mobile
-   browsers, where it includes the collapsing address bar. */
-#app {
-  display: flex;
-  flex-direction: column;
-  height: var(--vh, 100vh);
-  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
-}
-#game { flex: 1; min-height: 0; position: relative; touch-action: none; }
-#game canvas { display: block; touch-action: none; }
+#app { display: flex; flex-direction: column; height: 100vh; }
+#game { flex: 1; min-height: 0; position: relative; }
+#game canvas { display: block; }
 
-body.in-menu #rulebar, body.in-menu #statusbar, body.in-menu #pad { display: none; }
+body.in-menu #rulebar, body.in-menu #statusbar { display: none; }
 
 /* ---------- rule bar ---------- */
 #rulebar {
@@ -51,7 +40,7 @@ body.in-menu #rulebar, body.in-menu #statusbar, body.in-menu #pad { display: non
 .rule-label { font-size: 11px; letter-spacing: 4px; color: var(--dim); }
 #rules { display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .rule {
-  font-size: clamp(18px, 5.2vw, 34px);
+  font-size: clamp(20px, 3.4vw, 34px);
   font-weight: 700;
   letter-spacing: 2px;
   display: flex;
@@ -72,9 +61,7 @@ body.in-menu #rulebar, body.in-menu #statusbar, body.in-menu #pad { display: non
   box-shadow: 0 0 0 0 rgba(255, 209, 102, 0.5);
   animation: breathe 2.2s ease-in-out infinite;
 }
-@media (hover: hover) {
-  .word.editable:hover { background: rgba(255, 209, 102, 0.12); }
-}
+.word.editable:hover { background: rgba(255, 209, 102, 0.12); }
 .word.editing { background: rgba(255, 209, 102, 0.2); animation: none; }
 .word.glitch { animation: glitch 0.32s steps(2) both; }
 .word.pop { animation: pop 0.45s cubic-bezier(.2, 1.6, .4, 1) both; }
@@ -155,62 +142,10 @@ button {
   cursor: pointer;
   transition: transform 0.08s, filter 0.15s;
 }
-@media (hover: hover) {
-  button:hover { filter: brightness(1.1); }
-  button.ghost:hover { border-color: var(--dim); }
-}
+button:hover { filter: brightness(1.1); }
 button:active { transform: translateY(1px); }
 button.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
-button.icon { padding: 6px 10px; font-size: 15px; line-height: 1; }
-button.icon.on { color: var(--accent); border-color: var(--accent); }
-
-/* ---------- on-screen pad ---------- */
-#pad {
-  position: absolute;
-  right: max(10px, env(safe-area-inset-right));
-  bottom: max(10px, env(safe-area-inset-bottom));
-  display: grid;
-  grid-template-columns: repeat(3, var(--pad-btn, 54px));
-  grid-template-rows: repeat(3, var(--pad-btn, 54px));
-  gap: 4px;
-  z-index: 8;
-  touch-action: none;
-}
-.pad-btn {
-  background: rgba(29, 26, 41, 0.82);
-  border: 1px solid var(--line);
-  color: var(--text);
-  border-radius: 10px;
-  font-size: 17px;
-  padding: 0;
-  width: 100%;
-  height: 100%;
-  backdrop-filter: blur(2px);
-}
-.pad-btn:active { background: var(--accent); color: #1a1400; }
-.pad-btn[data-dir='up'] { grid-area: 1 / 2; }
-.pad-btn[data-dir='left'] { grid-area: 2 / 1; }
-.pad-btn[data-dir='wait'] { grid-area: 2 / 2; font-size: 22px; color: var(--dim); }
-.pad-btn[data-dir='right'] { grid-area: 2 / 3; }
-.pad-btn[data-dir='down'] { grid-area: 3 / 2; }
-
-/* ---------- AI note ---------- */
-#ai-note {
-  position: absolute;
-  left: 50%;
-  bottom: 6px;
-  transform: translateX(-50%);
-  max-width: min(92%, 640px);
-  text-align: center;
-  font-size: 12px;
-  color: var(--dim);
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.3s;
-  z-index: 7;
-}
-#ai-note.show { opacity: 1; }
-body.pad-on #ai-note { max-width: calc(100% - 200px); left: calc(50% - 90px); }
+button.ghost:hover { border-color: var(--dim); }
 
 /* ---------- panels ---------- */
 .panel {
@@ -236,32 +171,6 @@ body.pad-on #ai-note { max-width: calc(100% - 200px); left: calc(50% - 90px); }
   padding: 14px;
   animation: fadeIn 0.15s ease-out;
 }
-/* Phones: a sheet pinned above the virtual keyboard instead of a floating popup. */
-#editor.sheet {
-  left: 0;
-  right: 0;
-  width: 100%;
-  border-radius: 14px 14px 0 0;
-  border-left: 0;
-  border-right: 0;
-  border-bottom: 0;
-  padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
-  animation: sheetIn 0.18s ease-out;
-}
-@keyframes sheetIn { from { transform: translateY(100%); } }
-
-#editor-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-#editor-chips[hidden] { display: none; }
-.chip {
-  background: transparent;
-  border: 1px solid var(--line);
-  color: var(--dim);
-  font-size: 12px;
-  letter-spacing: 1px;
-  padding: 7px 11px;
-  border-radius: 999px;
-}
-.chip:active { background: var(--accent); color: #1a1400; border-color: var(--accent); }
 .editor-title { font-size: 13px; color: var(--dim); margin-bottom: 8px; }
 #editor-old { color: var(--accent); font-weight: 700; }
 #editor-input {
@@ -330,39 +239,169 @@ body.pad-on #ai-note { max-width: calc(100% - 200px); left: calc(50% - 90px); }
   100% { opacity: 0; transform: translate(-50%, -70%); }
 }
 
-/* ---------- phones ---------- */
-@media (max-width: 720px) {
+/* ---------- sound toggle ---------- */
+#btn-sound {
+  position: fixed;
+  right: 10px; top: 10px;
+  z-index: 40;
+  width: 38px; height: 38px;
+  padding: 0;
+  font-size: 17px;
+  line-height: 1;
+  background: var(--panel);
+  color: var(--accent);
+  border: 1px solid var(--line);
+  opacity: 0.75;
+}
+#btn-sound:hover { opacity: 1; }
+#btn-sound.off { color: var(--dim); }
+
+@media (max-width: 640px) {
   .keys { display: none; }
-  #rulebar { padding: 8px 10px 8px; gap: 3px; }
-  .rule-label { font-size: 9px; letter-spacing: 3px; }
-  .rule { letter-spacing: 1px; gap: 0 0.4em; }
-  .rule.fixed { font-size: 12px; }
-  .word.editable { border-width: 2px; padding: 0 0.25em; }
-
-  #statusbar { gap: 8px; padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); font-size: 10px; }
-  #level-name { letter-spacing: 1px; font-size: 10px; flex-basis: 100%; }
-  #statusbar button { padding: 8px 10px; font-size: 11px; }
-  #statusbar kbd, .btn-label { display: none; }
-  #statusbar .stat { white-space: nowrap; }
-
-  #pad { --pad-btn: 50px; }
-  #editor-input { font-size: 16px; } /* iOS zooms the page for anything under 16px */
-  #editor-old { display: inline-block; }
-  .complete-panel { width: calc(100vw - 24px); padding: 20px 16px 16px; }
-  #complete-title { font-size: 20px; letter-spacing: 2px; }
-  #complete-rule { font-size: 15px; }
-  #complete-stats { font-size: 13px; }
-  #toast { font-size: 18px; letter-spacing: 2px; }
+  #statusbar { gap: 10px; }
+  #btn-sound { width: 44px; height: 44px; font-size: 19px; }
 }
 
-/* Landscape phones: the rule bar and status bar eat the little height there is. */
-@media (max-height: 460px) and (orientation: landscape) {
-  #rulebar { padding: 4px 10px; }
+/* The Living Manuscript */
+:root { --bg: #101d27; --panel: #182b34; --line: #45504c; --text: #f0e6cd; --dim: #aebbb6; --accent: #d6b575; --red: #f18475; --good: #8fcbb3; }
+body { background: radial-gradient(ellipse at 50% 40%, #263b43, #0b161f 75%); }
+#app { height: 100dvh; }
+#rulebar { padding: 18px 16px 16px; background: linear-gradient(180deg, #1b2c34, #111f29); border-bottom-color: #d6b57555; box-shadow: 0 10px 35px #0003; z-index: 2; }
+.rule-label { color: #bfa679; font-size: 9px; letter-spacing: 4px; margin-bottom: 7px; }
+.word.editable { border-width: 1px; border-radius: 2px; padding: 1px .4em; background: #d6b57512; }
+#statusbar { background: #101e27; border-top-color: #d6b57540; font-size: 10px; padding: 14px 22px; }
+#level-name { color: #d6b575; letter-spacing: 1px; }
+button { border-radius: 2px; padding: 10px 14px; font-size: 11px; }
+.panel { border-radius: 3px; border-color: #d6b57580; background: linear-gradient(145deg, #20343d, #11222d); box-shadow: 0 24px 90px #0009; }
+#editor { padding: 20px; }
+#editor-input { background: #0f1d26; border-radius: 2px; }
+#complete-title { font-family: 'Cormorant Garamond', Georgia, serif; font-size: 38px; font-weight: 500; letter-spacing: 1px; }
+.complete-panel { width: min(490px, calc(100vw - 32px)); padding: 36px 28px; }
+#tutorial-tip { border-radius: 2px; font-size: 10px; }
+button:focus-visible, .word.editable:focus-visible { outline: 2px solid var(--text); outline-offset: 4px; }
+@media (max-width: 640px) { #statusbar { gap: 8px; padding: 8px; } #statusbar .stat { font-size: 9px; } #level-name { width: 100%; } #rulebar { padding: 10px; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
+
+/* Touch controls from the mobile branch. */
+
+#pad {
+  position: absolute;
+  right: max(10px, env(safe-area-inset-right));
+  bottom: max(10px, env(safe-area-inset-bottom));
+  display: grid;
+  grid-template-columns: repeat(3, var(--pad-btn, 54px));
+  grid-template-rows: repeat(3, var(--pad-btn, 54px));
+  gap: 4px;
+  z-index: 8;
+  touch-action: none;
+}
+.pad-btn {
+  background: rgba(29, 26, 41, 0.82);
+  border: 1px solid var(--line);
+  color: var(--text);
+  border-radius: 10px;
+  font-size: 17px;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  backdrop-filter: blur(2px);
+}
+.pad-btn:active { background: var(--accent); color: #1a1400; }
+.pad-btn[data-dir='up'] { grid-area: 1 / 2; }
+.pad-btn[data-dir='left'] { grid-area: 2 / 1; }
+.pad-btn[data-dir='wait'] { grid-area: 2 / 2; font-size: 22px; color: var(--dim); }
+.pad-btn[data-dir='right'] { grid-area: 2 / 3; }
+.pad-btn[data-dir='down'] { grid-area: 3 / 2; }
+
+
+#editor.sheet {
+  left: 0;
+  right: 0;
+  width: 100%;
+  border-radius: 14px 14px 0 0;
+  border-left: 0;
+  border-right: 0;
+  border-bottom: 0;
+  padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
+  animation: sheetIn 0.18s ease-out;
+}
+@keyframes sheetIn { from { transform: translateY(100%); } }
+
+#editor-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+#editor-chips[hidden] { display: none; }
+.chip {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--dim);
+  font-size: 12px;
+  letter-spacing: 1px;
+  padding: 7px 11px;
+  border-radius: 999px;
+}
+.chip:active { background: var(--accent); color: #1a1400; border-color: var(--accent); }
+
+/* Storybook presentation across touch, desktop and keyboard viewports. */
+body { overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
+#app { height: var(--vh, 100dvh); padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+#game, #game canvas { touch-action: none; }
+body.in-menu #pad { display: none; }
+body.editing-word #pad { visibility: hidden; }
+#pad { z-index: 4; bottom: 8px; left: 50%; right: auto; transform: translateX(-50%); }
+.pad-btn { background: #142b34ee; color: #e8ce97; border: 1px solid #b79b6180; border-radius: 7px; box-shadow: inset 0 1px #f6dc9b22; }
+button { touch-action: manipulation; }
+.complete-panel { position: relative; max-height: calc(var(--vh, 100dvh) - 24px); overflow-y: auto; border: 1px solid #bc9c62; outline: 1px solid #bc9c6240; outline-offset: -7px; animation: chapterReveal .55s ease-out; }
+.chapter-seal { margin: 0 auto 10px; color: #e4ca87; font-size: 27px; width: 52px; height: 52px; line-height: 48px; border: 1px solid #b59a62; border-radius: 50%; }
+@keyframes chapterReveal { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+#complete-solutions .pips, .complete-buttons { flex-wrap: wrap; }
+#complete-stats { overflow-wrap: anywhere; }
+#toast { max-width: calc(100vw - 24px); text-align: center; white-space: normal; }
+#editor.sheet { max-height: calc(var(--vh, 100dvh) - 12px); overflow-y: auto; border-radius: 12px 12px 0 0; }
+#mobile-menu { display: none; }
+@media (max-width: 720px), (max-height: 500px) and (pointer: coarse) {
+  button, summary { min-height: 44px; }
+  #statusbar { gap: 6px; padding: 6px 8px; }
+  #statusbar button { padding: 8px 10px; }
+  #statusbar kbd, .keys { display: none; }
+  #level-name { width: 100%; }
+  #rulebar { padding: 8px; max-height: 30vh; overflow-y: auto; }
+  .rule-label { margin-bottom: 3px; }
+  .rule { font-size: clamp(18px, 5vw, 26px); gap: 2px .4em; letter-spacing: 1px; }
+  .word.editable { min-height: 44px; display: inline-flex; align-items: center; }
+  .rule { align-items: center; }
+  .rule.fixed { font-size: 12px; }
+  #pad { --pad-btn: 48px; }
+  #editor-input { font-size: 18px; }
+  .complete-panel { padding: 22px 18px; }
+  #complete-title { font-size: 32px; }
+  #complete-rule { font-size: 15px; }
+  #complete-stats { font-size: 12px; }
+  body.in-menu #game { background: linear-gradient(#07131b55, #07131bc9); background-size: cover; background-position: center; }
+  body.in-menu #game canvas { visibility: hidden; }
+  body.in-menu #mobile-menu { display: flex; position: absolute; inset: 0; z-index: 2; flex-direction: column; align-items: center; gap: 16px; padding: 40px 18px 24px; overflow-y: auto; touch-action: pan-y; }
+  #mobile-menu h1 { font: 500 clamp(48px, 14vw, 78px)/1 'Cormorant Garamond', Georgia, serif; color: #f7edd8; white-space: nowrap; }
+  .mobile-eyebrow { font-size: 11px; letter-spacing: 2px; color: #d6b575; }
+  .mobile-subtitle { font: italic 22px 'Cormorant Garamond', Georgia, serif; text-align: center; }
+  #mobile-begin { width: min(300px, 100%); font-size: 13px; margin-top: 12px; }
+  .mobile-modes { display: flex; gap: 8px; justify-content: center; }
+  .mobile-modes button { min-width: 120px; background: #10232cc9; letter-spacing: 2px; }
+  .mobile-modes button[aria-pressed="true"] { background: #d6b575; color: #14212a; }
+  .mobile-chapters { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+  .mobile-chapters button { min-width: 44px; background: #10232cc9; }
+  .mobile-outfits { display: flex; gap: 6px; width: 100%; max-width: 390px; }
+  .mobile-outfits button { flex: 1; min-width: 0; padding: 7px 3px; font-size: 10px; letter-spacing: 0; background: #10232cd9; }
+  .mobile-outfits button[aria-pressed=true] { border-color: #e4c480; background: #6d563d99; }
+  .mobile-portrait { display: block; width: 72px; height: 72px; margin: 0 auto 6px; background-size: 288px 288px; }
+  #mobile-menu details { width: min(380px, 100%); text-align: center; font-size: 13px; line-height: 1.7; }
+  #mobile-menu summary { cursor: pointer; line-height: 44px; color: #dfc490; }
+  #mobile-menu a { color: #c3b69e; font-size: 12px; min-height: 44px; padding: 12px; }
+}
+@media (max-height: 500px) and (orientation: landscape) {
+  #rulebar { padding: 4px 8px; }
   .rule-label { display: none; }
-  .rule { font-size: clamp(15px, 3.2vw, 22px); }
   #statusbar { padding: 4px 8px; }
-  #level-name { flex-basis: auto; }
-  #pad { --pad-btn: 44px; }
+  #level-name { width: auto; }
+  #pad { --pad-btn: 44px; grid-template-columns: repeat(5, var(--pad-btn)); grid-template-rows: var(--pad-btn); }
+  #pad .pad-btn { grid-row: 1; grid-column: auto; }
   /* The completion card is taller than a landscape phone; let it scroll inside the viewport. */
   .complete-panel { max-height: calc(var(--vh, 100vh) - 24px); overflow-y: auto; padding: 12px 16px; }
   #complete-title { font-size: 18px; }
@@ -370,54 +409,67 @@ body.pad-on #ai-note { max-width: calc(100% - 200px); left: calc(50% - 90px); }
   #complete-stats { margin: 8px auto 4px; }
   #complete-solutions { margin: 6px 0 10px; }
 }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; } }
 
-/* While a word is being rewritten the sheet covers the bottom of the screen. */
-body.editing-word #pad { display: none; }
+body:not(.in-menu) #game { background-image: none !important; }
+@media (max-width: 720px) { #statusbar { display: grid; grid-template-columns: repeat(3, auto) 1fr repeat(4, auto); } #level-name { grid-column: 1 / -1; } #statusbar .spacer { display: none; } #btn-pad { grid-column: 5; } #btn-restart { font-size: 0; } #btn-restart::after { content: "↻"; font-size: 20px; } #rulebar { overflow: visible; max-height: none; } }
 
-/* ---------- word book (side panel) ---------- */
-#middle { flex: 1; min-height: 0; display: flex; }
-#middle #game { flex: 1; min-width: 0; min-height: 0; }
+body.in-menu #game { touch-action: pan-y; }
+
+/* Integrated manuscript, word collection and landscape-only mobile play. */
+#play-area { display: flex; flex: 1; min-height: 0; min-width: 0; }
+#game { min-width: 0; }
+#wordbook { flex: 0 0 190px; min-width: 0; padding: 20px 12px; overflow-y: auto; border-left: 1px solid #d6b57555; background: linear-gradient(145deg, #1b3038, #10212a); }
 body.in-menu #wordbook { display: none; }
-#wordbook {
-  width: 200px;
-  flex-shrink: 0;
-  border-left: 1px solid var(--line);
-  background: #17151f;
-  padding: 16px 14px;
-  overflow-y: auto;
+#wordbook h2 { font-size: 11px; letter-spacing: 2px; color: var(--accent); margin-bottom: 6px; }
+#wb-count { float: right; }
+#wb-chapter { font-size: 11px; color: var(--dim); margin-bottom: 16px; }
+#wb-list { display: flex; flex-direction: column; gap: 8px; }
+.wb-word { width: 100%; display: flex; flex-direction: column; gap: 5px; text-align: left; color: var(--text); background: #d6b5750d; border: 1px solid #d6b57555; padding: 10px; min-height: 44px; overflow-wrap: anywhere; }
+.wb-word strong { color: var(--accent); font-size: 12px; }
+.wb-word small { font-size: 10px; line-height: 1.4; font-weight: 400; letter-spacing: 0; }
+.wb-word .wb-origin { color: var(--dim); font-size: 9px; }
+.wb-empty { color: var(--dim); font: italic 18px/1.5 'Cormorant Garamond', Georgia, serif; }
+.rule.multi { font-size: clamp(16px, 2.5vw, 24px); }
+.word.changed { background: #d6b57533; box-shadow: inset 0 -2px #d6b575; }
+#chapter-note { color: var(--dim); font-size: 11px; text-align: center; }
+#chapter-note:empty { display: none; }
+.mobile-outfits button:disabled { opacity: .5; cursor: default; }
+.mobile-outfits small { display: block; margin-top: 6px; font-size: 10px; line-height: 1.4; white-space: normal; }
+#rotate-screen { position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; gap: 20px; justify-content: center; align-items: center; text-align: center; padding: 32px; color: #f0e6cd; background: radial-gradient(ellipse at 50% 30%, #30454c, #0c1c26 75%); }
+#rotate-screen h1 { font: 500 clamp(32px, 9vw, 48px)/1.1 'Cormorant Garamond', Georgia, serif; }
+#rotate-screen p { max-width: 290px; font-size: 14px; line-height: 1.7; }
+#rotate-screen .rotate-note { color: #aebbb6; font-size: 12px; }
+.rotate-phone { width: 105px; height: 65px; border: 2px solid #d6b575; border-radius: 9px; font-size: 42px; color: #d6b575; line-height: 56px; box-shadow: 0 0 45px #d6b57515; }
+.portrait-blocked #app, .portrait-blocked #editor, .portrait-blocked #complete, .portrait-blocked #toast, .portrait-blocked #btn-sound { visibility: hidden; pointer-events: none; }
+@media (pointer: coarse) and (orientation: landscape) {
+  #wordbook { flex-basis: 145px; padding: 12px 8px; }
+  #rulebar { padding: 4px 48px; gap: 2px; }
+  #rules { flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 2px 14px; }
+  .rule, .rule.multi { font-size: 14px; line-height: 1.1; letter-spacing: .5px; gap: 2px 6px; }
+  .word.editable { min-height: 34px; }
+  .rule.fixed { font-size: 12px; }
+  #chapter-note { font-size: 10px; }
+  #statusbar { display: flex; padding: 4px 8px; gap: 8px; font-size: 10px; }
+  #level-name { width: auto; flex: 1; }
+  #statusbar .stat { display: none; }
+  #statusbar .spacer { display: none; }
+  #statusbar button { min-height: 40px; }
+  #pad { --pad-btn: 44px; }
+  .wb-word { padding: 7px; }
+  .wb-word small { font-size: 10px; }
+  #editor.sheet { width: min(440px, 100%); left: 50%; right: auto; transform: translateX(-50%); padding: 10px 14px; animation: fadeIn .15s ease-out; }
+  body.in-menu #mobile-menu { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: auto auto auto auto auto auto; align-content: center; justify-items: center; gap: 8px 28px; padding: 20px 45px; }
+  #mobile-menu > :nth-child(1) { grid-area: 1 / 1; }
+  #mobile-menu h1 { grid-area: 2 / 1; font-size: 58px; }
+  #mobile-menu .mobile-subtitle { grid-area: 3 / 1; font-size: 20px; }
+  #mobile-begin { grid-area: 4 / 1; margin: 0; }
+  #mobile-menu .mobile-chapters { grid-area: 5 / 1 / 7 / 2; gap: 5px; }
+  .mobile-chapters button { min-width: 36px; min-height: 38px; padding: 6px 10px; }
+  #mobile-menu > :nth-child(6) { grid-area: 1 / 2; }
+  #mobile-menu .mobile-outfits { grid-area: 2 / 2 / 5 / 3; }
+  #mobile-menu details { grid-area: 5 / 2; }
+  #mobile-menu > a { grid-area: 6 / 2; min-height: 30px; padding: 5px; }
+  .mobile-portrait { width: 64px; height: 64px; background-size: 256px 256px; }
+  .mobile-outfits button { font-size: 11px; }
 }
-.wb-head { display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; letter-spacing: 3px; margin-bottom: 12px; }
-#wb-count { color: var(--accent); letter-spacing: 1px; }
-.wb-words { display: flex; flex-direction: column; gap: 6px; }
-.wb-word {
-  font-family: var(--font); font-size: 14px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
-  text-align: left; background: #1f1c2b; color: var(--text); border: 1px solid var(--line);
-  border-radius: 6px; padding: 7px 10px;
-}
-.wb-word:hover { border-color: var(--accent); color: var(--accent); filter: none; }
-.wb-word.ai::after { content: ' ✦'; color: var(--accent); }
-.wb-word.new { animation: wbNew 1.6s ease-out; }
-@keyframes wbNew { 0% { background: var(--accent); color: #1a1400; transform: scale(1.08); } 100% { background: #1f1c2b; } }
-.wb-empty { color: var(--dim); font-size: 12px; line-height: 1.55; }
-#wb-tip {
-  position: fixed; z-index: 40; pointer-events: none;
-  max-width: 220px; padding: 8px 10px;
-  background: #0f0d16; border: 1px solid var(--line); border-radius: 6px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-  font-size: 12px; line-height: 1.45; color: var(--text);
-}
-.wb-tip-word { font-weight: 700; letter-spacing: 1px; }
-.wb-tip-word span { color: var(--accent); }
-.wb-tip-meta { color: var(--dim); font-size: 10px; margin-top: 2px; }
-.wb-tip-meta:empty { display: none; }
-@media (max-width: 800px) { #wordbook { display: none; } }
-
-/* ---------- multi-rule levels ---------- */
-.rule.multi { font-size: clamp(16px, 2.4vw, 24px); }
-#rules:has(.rule.multi) { gap: 2px; }
-.word.editable.changed {
-  background: var(--accent);
-  color: #1a1400;
-  animation: none;
-}
-.word.editable.changed:hover { background: #ffdd88; }
