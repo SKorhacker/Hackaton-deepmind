@@ -27,4 +27,7 @@ export default defineLevel({
   // hold the pressure plate that keeps the door open.
   solutions: [['HIDE', 'HELP'], ['HEAL', 'HELP'], ['BOUNCE', 'HELP']],
   hintWords: ['BOUNCE', 'HELP'],
+  // The one level where two words may differ from the original at once.
+  maxChanges: 2,
+  intro: 'This time, two words may change.',
 });

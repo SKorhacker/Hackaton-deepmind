@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && node tools/check-no-keys.mjs",
     "preview": "vite preview",
     "test": "tsx tests/solutions.test.ts",
     "preview:lan": "vite preview --host",

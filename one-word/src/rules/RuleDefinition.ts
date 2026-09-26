@@ -7,7 +7,7 @@ export const MECHANICS = [
 ] as const;
 export type Mechanic = (typeof MECHANICS)[number];
 
-export const NOUNS = ['YOU', 'GUARD', 'KEY', 'EXIT', 'RED', 'BLUE', 'PLATE', 'DOOR'] as const;
+export const NOUNS = ['YOU', 'GUARD', 'EVERYONE', 'KEY', 'EXIT', 'RED', 'BLUE', 'PLATE', 'DOOR'] as const;
 export type Noun = (typeof NOUNS)[number];
 
 export type Condition = 'ON_RED' | 'ON_BLUE' | 'NEAR_YOU';
@@ -26,7 +26,7 @@ export interface RuleDefinition {
   object?: Noun;
   condition?: Condition;
 
-  /** Shorthand for a rule with a single editable word. */
+  /** Shorthand for a rule with a single editable word. Omitted for fixed rules. */
   editablePart?: RulePart;
   /** Tokens (mechanics or nouns) `editablePart` may become. */
   allowedReplacements?: string[];

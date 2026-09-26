@@ -20,6 +20,12 @@ export interface LevelDefinition {
   /** Example words shown when the player types something the world doesn't understand. */
   hintWords?: string[];
   tutorial?: boolean;
+  /** Hard levels: no word works if typed at the start — you must rewrite at the right moment. */
+  timed?: boolean;
+  /** Short line shown when the level starts. */
+  intro?: string;
+  /** How many words may differ from the original at once (default 1: the ONE WORD rule). */
+  maxChanges?: number;
 }
 
 /** Identity helper: gives level files type-checking and autocomplete. */

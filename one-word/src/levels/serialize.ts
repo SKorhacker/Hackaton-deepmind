@@ -57,6 +57,9 @@ export function levelFileSource(def: LevelDefinition): string {
   lines.push(`  solutions: [${def.solutions.map((s) => (Array.isArray(s) ? list(s) : quote(s))).join(', ')}],`);
   if (def.hintWords?.length) lines.push(`  hintWords: ${list(def.hintWords)},`);
   if (def.tutorial) lines.push('  tutorial: true,');
+  if (def.timed) lines.push('  timed: true,');
+  if (def.intro) lines.push(`  intro: ${quote(def.intro)},`);
+  if (def.maxChanges && def.maxChanges !== 1) lines.push(`  maxChanges: ${def.maxChanges},`);
   lines.push('});');
   return lines.join('\n') + '\n';
 }
