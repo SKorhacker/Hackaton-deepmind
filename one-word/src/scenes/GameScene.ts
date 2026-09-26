@@ -561,7 +561,11 @@ export class GameScene extends Phaser.Scene {
       }
     }
     if (res.token === this.rules.tokenAt(slot)) {
-      return { ok: false as const, message: "THAT'S ALREADY THE RULE." };
+      return {
+        ok: false as const,
+        message: `THE RULE ALREADY SAYS ${res.token} — NOTHING WOULD CHANGE.`,
+        hint: 'TRY A WORD THAT MEANS SOMETHING ELSE',
+      };
     }
     // ONE WORD: rewriting this slot restores the oldest rewritten one if over the level's limit.
     this.activeWord = { word: normalizeWord(raw) ?? raw.trim(), token: res.token, ai: res.source === 'ai' };
