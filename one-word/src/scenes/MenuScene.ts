@@ -27,7 +27,8 @@ export class MenuScene extends Phaser.Scene {
     const { width: W, height: H } = this.scale;
     this.lastSize = { w: W, h: H };
     const s = Phaser.Math.Clamp(Math.min(W / REF_W, H / REF_H), 0.42, 1.2);
-    const fs = (px: number) => `${Math.round(px * s)}px`;
+    // Layout shrinks with the viewport, text only down to a legible floor.
+    const fs = (px: number, min = 13) => `${Math.max(min, Math.round(px * s))}px`;
     this.drawBackdrop(W, H);
 
     const title = this.add.text(W / 2, H * 0.26, 'ONE WORD', { fontFamily: FONT, fontSize: fs(84), fontStyle: 'bold', color: '#ece8f5' }).setOrigin(0.5);
@@ -39,11 +40,11 @@ export class MenuScene extends Phaser.Scene {
         this.time.delayedCall(260, () => title.setText('ONE WORD').setColor('#ece8f5'));
       },
     });
-    this.add.text(W / 2, H * 0.26 + 72 * s, 'Change one word.\nChange the world.', { fontFamily: FONT, fontSize: fs(20), color: '#8a85a0', align: 'center', lineSpacing: 6 * s }).setOrigin(0.5);
+    this.add.text(W / 2, H * 0.26 + 72 * s, 'Change one word.\nChange the world.', { fontFamily: FONT, fontSize: fs(20, 14), color: '#8a85a0', align: 'center', lineSpacing: 6 * s }).setOrigin(0.5);
 
     const btnH = Math.max(MIN_TAP, 48 * s);
-    this.button(W / 2, H * 0.6, Math.min(W - 48, 240 * Math.max(s, 0.8)), btnH, 'PLAY', true, fs(18), () => this.start(0));
-    this.button(W / 2, H * 0.6 + btnH + 14, Math.min(W - 48, 240 * Math.max(s, 0.8)), btnH, 'HOW TO PLAY', false, fs(16), () => this.howTo());
+    this.button(W / 2, H * 0.6, Math.min(W - 48, 240 * Math.max(s, 0.8)), btnH, 'PLAY', true, fs(18, 15), () => this.start(0));
+    this.button(W / 2, H * 0.6 + btnH + 14, Math.min(W - 48, 240 * Math.max(s, 0.8)), btnH, 'HOW TO PLAY', false, fs(16, 13), () => this.howTo());
 
     // Level select (handy for demos).
     const gap = Math.max(MIN_TAP, 44 * s);
@@ -52,7 +53,7 @@ export class MenuScene extends Phaser.Scene {
     LEVELS.forEach((l, i) => {
       const solved = session.best.has(l.id);
       const t = this.add.text(lx + i * gap, ly, String(l.id), {
-        fontFamily: FONT, fontSize: fs(16), color: solved ? '#5ee6a0' : '#5d5873',
+        fontFamily: FONT, fontSize: fs(16, 15), color: solved ? '#5ee6a0' : '#5d5873',
         backgroundColor: '#1d1a29', padding: { x: 10, y: 6 },
       }).setOrigin(0.5);
       const hw = Math.max(MIN_TAP, t.width), hh = Math.max(MIN_TAP, t.height);
@@ -65,9 +66,9 @@ export class MenuScene extends Phaser.Scene {
       t.on('pointerout', () => t.setColor(solved ? '#5ee6a0' : '#5d5873'));
       t.on('pointerdown', () => this.start(i));
     });
-    this.add.text(W / 2, ly - Math.max(26, 30 * s), 'LEVELS', { fontFamily: FONT, fontSize: fs(11), color: '#5d5873' }).setOrigin(0.5);
+    this.add.text(W / 2, ly - Math.max(26, 30 * s), 'LEVELS', { fontFamily: FONT, fontSize: fs(11, 10), color: '#5d5873' }).setOrigin(0.5);
 
-    const ai = this.add.text(W - 10, H - 8, '', { fontFamily: FONT, fontSize: fs(11), color: '#5d5873' }).setOrigin(1, 1).setInteractive({ useHandCursor: true });
+    const ai = this.add.text(W - 10, H - 8, '', { fontFamily: FONT, fontSize: fs(11, 10), color: '#5d5873' }).setOrigin(1, 1).setInteractive({ useHandCursor: true });
     const refreshAi = () => ai.setText(openAIKey() ? `AI: ON (${OPENAI_MODEL})` : 'AI: OFF · tap to add an OpenAI key');
     refreshAi();
     ai.on('pointerdown', () => {
@@ -112,8 +113,9 @@ export class MenuScene extends Phaser.Scene {
     const s = Phaser.Math.Clamp(Math.min(W / REF_W, H / REF_H), 0.42, 1.2);
     const layer = this.add.container(0, 0).setDepth(10);
     const shade = this.add.rectangle(W / 2, H / 2, W, H, 0x0a0810, 0.85).setInteractive();
-    const panel = this.add.rectangle(W / 2, H / 2, Math.min(W - 32, 520), Math.min(H - 60, 330), 0x1d1a29).setStrokeStyle(1, 0x34304a);
-    const body = this.add.text(W / 2, H / 2 - 30 * s, [
+    const panel = this.add.rectangle(W / 2, H / 2, Math.min(W - 32, 520), Math.min(H - 60, 360), 0x1d1a29).setStrokeStyle(1, 0x34304a);
+    const fs = (px: number, min: number) => `${Math.max(min, Math.round(px * s))}px`;
+    const body = this.add.text(W / 2, H / 2 - Math.max(24, 30 * s), [
       'Each level has one rule.',
       '',
       'Change exactly one word.',
@@ -121,9 +123,10 @@ export class MenuScene extends Phaser.Scene {
       'The world will obey the new sentence.',
       '',
       'Reach the exit.',
-    ].join('\n'), { fontFamily: FONT, fontSize: `${Math.round(19 * s)}px`, color: '#ece8f5', align: 'center', wordWrap: { width: Math.min(W - 60, 480) } }).setOrigin(0.5);
-    const example = this.add.text(W / 2, H / 2 + 100 * s, 'YOU DIE ON RED  →  YOU HIDE ON RED', { fontFamily: FONT, fontSize: `${Math.round(14 * s)}px`, color: '#ffd166' }).setOrigin(0.5);
-    const close = this.add.text(W / 2, H / 2 + 140 * s, isTouch() ? 'tap anywhere' : 'click anywhere', { fontFamily: FONT, fontSize: `${Math.round(12 * s)}px`, color: '#5d5873' }).setOrigin(0.5);
+    ].join('\n'), { fontFamily: FONT, fontSize: fs(19, 15), color: '#ece8f5', align: 'center', wordWrap: { width: Math.min(W - 60, 480) } }).setOrigin(0.5);
+    // Anchored to the text block so the bigger phone type can't collide with it.
+    const example = this.add.text(W / 2, body.getBounds().bottom + 22, 'YOU DIE ON RED  →  YOU HIDE ON RED', { fontFamily: FONT, fontSize: fs(14, 12), color: '#ffd166', align: 'center', wordWrap: { width: Math.min(W - 60, 480) } }).setOrigin(0.5, 0);
+    const close = this.add.text(W / 2, example.getBounds().bottom + 16, isTouch() ? 'tap anywhere' : 'click anywhere', { fontFamily: FONT, fontSize: fs(12, 11), color: '#5d5873' }).setOrigin(0.5, 0);
     layer.add([shade, panel, body, example, close]);
     shade.on('pointerdown', () => layer.destroy());
   }
