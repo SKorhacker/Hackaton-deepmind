@@ -62,10 +62,10 @@ export class MenuScene extends Phaser.Scene {
     this.add.text(W / 2, H - 94, 'LEVELS', { fontFamily: FONT, fontSize: '11px', color: '#5d5873' }).setOrigin(0.5);
 
     const ai = this.add.text(W - 14, H - 12, '', { fontFamily: FONT, fontSize: '11px', color: '#5d5873' }).setOrigin(1, 1).setInteractive({ useHandCursor: true });
-    const refreshAi = () => { const p = aiProvider(); ai.setText(p ? `AI interpreter: ON (${p.model})` : 'AI interpreter: OFF · click to add a Gemini or OpenAI key'); };
+    const refreshAi = () => { const p = aiProvider(); ai.setText(p ? 'AI interpreter: ON' : 'AI interpreter: OFF · click to add a Gemini key'); };
     refreshAi();
     ai.on('pointerdown', () => {
-      const k = window.prompt('Gemini (Google AI Studio) or OpenAI API key, stored only in this browser. Leave empty to turn AI off.', '');
+      const k = window.prompt('Gemini API key (from Google AI Studio), stored only in this browser. Leave empty to turn AI off.', '');
       if (k !== null) { setAIKey(k.trim()); refreshAi(); refreshMode(); }
     });
     this.askForKey = () => ai.emit('pointerdown');
