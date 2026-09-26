@@ -10,6 +10,8 @@ export interface InterpretContext {
 
 export interface WordInterpreter {
   interpretWord(input: string, allowed: string[], context?: InterpretContext): Promise<string | null>;
+  /** Short explanation of the last successful interpretation, if the interpreter gives one. */
+  lastNote?: string;
 }
 
 export type InterpretResult =
