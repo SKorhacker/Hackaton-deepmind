@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "preview:lan": "vite preview --host",
+    "itch": "npm run build && rm -f one-word-itch.zip && cd dist && zip -qr ../one-word-itch.zip .",
     "test": "tsx tests/solutions.test.ts"
   },
   "dependencies": {

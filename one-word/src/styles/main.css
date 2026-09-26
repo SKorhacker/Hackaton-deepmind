@@ -18,13 +18,24 @@ body {
   font-family: var(--font);
   overflow: hidden;
   user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+  touch-action: manipulation;
 }
 
-#app { display: flex; flex-direction: column; height: 100vh; }
-#game { flex: 1; min-height: 0; position: relative; }
-#game canvas { display: block; }
+/* --vh is the *visual* viewport height (see ui/Device.ts): 100vh is wrong on mobile
+   browsers, where it includes the collapsing address bar. */
+#app {
+  display: flex;
+  flex-direction: column;
+  height: var(--vh, 100vh);
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+#game { flex: 1; min-height: 0; position: relative; touch-action: none; }
+#game canvas { display: block; touch-action: none; }
 
-body.in-menu #rulebar, body.in-menu #statusbar { display: none; }
+body.in-menu #rulebar, body.in-menu #statusbar, body.in-menu #pad { display: none; }
 
 /* ---------- rule bar ---------- */
 #rulebar {
@@ -40,7 +51,7 @@ body.in-menu #rulebar, body.in-menu #statusbar { display: none; }
 .rule-label { font-size: 11px; letter-spacing: 4px; color: var(--dim); }
 #rules { display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .rule {
-  font-size: clamp(20px, 3.4vw, 34px);
+  font-size: clamp(18px, 5.2vw, 34px);
   font-weight: 700;
   letter-spacing: 2px;
   display: flex;
@@ -61,7 +72,9 @@ body.in-menu #rulebar, body.in-menu #statusbar { display: none; }
   box-shadow: 0 0 0 0 rgba(255, 209, 102, 0.5);
   animation: breathe 2.2s ease-in-out infinite;
 }
-.word.editable:hover { background: rgba(255, 209, 102, 0.12); }
+@media (hover: hover) {
+  .word.editable:hover { background: rgba(255, 209, 102, 0.12); }
+}
 .word.editing { background: rgba(255, 209, 102, 0.2); animation: none; }
 .word.glitch { animation: glitch 0.32s steps(2) both; }
 .word.pop { animation: pop 0.45s cubic-bezier(.2, 1.6, .4, 1) both; }
@@ -142,10 +155,62 @@ button {
   cursor: pointer;
   transition: transform 0.08s, filter 0.15s;
 }
-button:hover { filter: brightness(1.1); }
+@media (hover: hover) {
+  button:hover { filter: brightness(1.1); }
+  button.ghost:hover { border-color: var(--dim); }
+}
 button:active { transform: translateY(1px); }
 button.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
-button.ghost:hover { border-color: var(--dim); }
+button.icon { padding: 6px 10px; font-size: 15px; line-height: 1; }
+button.icon.on { color: var(--accent); border-color: var(--accent); }
+
+/* ---------- on-screen pad ---------- */
+#pad {
+  position: absolute;
+  right: max(10px, env(safe-area-inset-right));
+  bottom: max(10px, env(safe-area-inset-bottom));
+  display: grid;
+  grid-template-columns: repeat(3, var(--pad-btn, 54px));
+  grid-template-rows: repeat(3, var(--pad-btn, 54px));
+  gap: 4px;
+  z-index: 8;
+  touch-action: none;
+}
+.pad-btn {
+  background: rgba(29, 26, 41, 0.82);
+  border: 1px solid var(--line);
+  color: var(--text);
+  border-radius: 10px;
+  font-size: 17px;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  backdrop-filter: blur(2px);
+}
+.pad-btn:active { background: var(--accent); color: #1a1400; }
+.pad-btn[data-dir='up'] { grid-area: 1 / 2; }
+.pad-btn[data-dir='left'] { grid-area: 2 / 1; }
+.pad-btn[data-dir='wait'] { grid-area: 2 / 2; font-size: 22px; color: var(--dim); }
+.pad-btn[data-dir='right'] { grid-area: 2 / 3; }
+.pad-btn[data-dir='down'] { grid-area: 3 / 2; }
+
+/* ---------- AI note ---------- */
+#ai-note {
+  position: absolute;
+  left: 50%;
+  bottom: 6px;
+  transform: translateX(-50%);
+  max-width: min(92%, 640px);
+  text-align: center;
+  font-size: 12px;
+  color: var(--dim);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s;
+  z-index: 7;
+}
+#ai-note.show { opacity: 1; }
+body.pad-on #ai-note { max-width: calc(100% - 200px); left: calc(50% - 90px); }
 
 /* ---------- panels ---------- */
 .panel {
@@ -171,6 +236,32 @@ button.ghost:hover { border-color: var(--dim); }
   padding: 14px;
   animation: fadeIn 0.15s ease-out;
 }
+/* Phones: a sheet pinned above the virtual keyboard instead of a floating popup. */
+#editor.sheet {
+  left: 0;
+  right: 0;
+  width: 100%;
+  border-radius: 14px 14px 0 0;
+  border-left: 0;
+  border-right: 0;
+  border-bottom: 0;
+  padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
+  animation: sheetIn 0.18s ease-out;
+}
+@keyframes sheetIn { from { transform: translateY(100%); } }
+
+#editor-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+#editor-chips[hidden] { display: none; }
+.chip {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--dim);
+  font-size: 12px;
+  letter-spacing: 1px;
+  padding: 7px 11px;
+  border-radius: 999px;
+}
+.chip:active { background: var(--accent); color: #1a1400; border-color: var(--accent); }
 .editor-title { font-size: 13px; color: var(--dim); margin-bottom: 8px; }
 #editor-old { color: var(--accent); font-weight: 700; }
 #editor-input {
@@ -239,7 +330,40 @@ button.ghost:hover { border-color: var(--dim); }
   100% { opacity: 0; transform: translate(-50%, -70%); }
 }
 
-@media (max-width: 640px) {
+/* ---------- phones ---------- */
+@media (max-width: 720px) {
   .keys { display: none; }
-  #statusbar { gap: 10px; }
+  #rulebar { padding: 8px 10px 8px; gap: 3px; }
+  .rule-label { font-size: 9px; letter-spacing: 3px; }
+  .rule { letter-spacing: 1px; gap: 0 0.4em; }
+  .rule.fixed { font-size: 12px; }
+  .word.editable { border-width: 2px; padding: 0 0.25em; }
+
+  #statusbar { gap: 8px; padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); font-size: 10px; }
+  #level-name { letter-spacing: 1px; font-size: 10px; flex-basis: 100%; }
+  #statusbar button { padding: 8px 10px; font-size: 11px; }
+  #statusbar kbd, .btn-label { display: none; }
+  #statusbar .stat { white-space: nowrap; }
+
+  #pad { --pad-btn: 50px; }
+  #editor-input { font-size: 16px; } /* iOS zooms the page for anything under 16px */
+  #editor-old { display: inline-block; }
+  .complete-panel { width: calc(100vw - 24px); padding: 20px 16px 16px; }
+  #complete-title { font-size: 20px; letter-spacing: 2px; }
+  #complete-rule { font-size: 15px; }
+  #complete-stats { font-size: 13px; }
+  #toast { font-size: 18px; letter-spacing: 2px; }
 }
+
+/* Landscape phones: the rule bar and status bar eat the little height there is. */
+@media (max-height: 460px) and (orientation: landscape) {
+  #rulebar { padding: 4px 10px; }
+  .rule-label { display: none; }
+  .rule { font-size: clamp(15px, 3.2vw, 22px); }
+  #statusbar { padding: 4px 8px; }
+  #level-name { flex-basis: auto; }
+  #pad { --pad-btn: 44px; }
+}
+
+/* While a word is being rewritten the sheet covers the bottom of the screen. */
+body.editing-word #pad { display: none; }

@@ -1,11 +1,17 @@
 import type { RuleDefinition } from '../rules/RuleDefinition';
 import { ruleTokens } from '../rules/RuleParser';
+import { isTouch, keyboardInset } from './Device';
 
-// DOM rule bar ("YOU [DIE] ON RED") + the small replace-word popup.
+// DOM rule bar ("YOU [DIE] ON RED") + the replace-word popup: a floating panel on
+// desktop, a sheet docked above the virtual keyboard on phones.
 
 export type SubmitOutcome = { ok: true } | { ok: false; message: string; hint?: string };
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+
+/** Below this width the popup can no longer float next to the word without covering it. */
+const SHEET_MAX_WIDTH = 720;
+const MAX_CHIPS = 6;
 
 export class RuleEditor {
   onSubmit: (raw: string) => Promise<SubmitOutcome> = async () => ({ ok: true });
@@ -18,7 +24,10 @@ export class RuleEditor {
   private msg = $('editor-msg');
   private hint = $('editor-hint');
   private tip = $('tutorial-tip');
+  private chips = $('editor-chips');
   private busy = false;
+  private suggestions: string[] = [];
+  private recent: string[] = [];
 
   constructor() {
     $('editor-form').addEventListener('submit', (e) => { e.preventDefault(); this.submit(); });
@@ -27,10 +36,49 @@ export class RuleEditor {
       if (e.key === 'Escape') { e.preventDefault(); this.close(); }
       e.stopPropagation();
     });
-    window.addEventListener('resize', () => { this.position(); this.positionTip(); });
-    document.addEventListener('mousedown', (e) => {
+    const reposition = () => { this.position(); this.positionTip(); };
+    window.addEventListener('resize', reposition);
+    window.addEventListener('orientationchange', () => setTimeout(reposition, 150));
+    // The virtual keyboard resizes the visual viewport, not the window.
+    window.visualViewport?.addEventListener('resize', reposition);
+    window.visualViewport?.addEventListener('scroll', reposition);
+    document.addEventListener('pointerdown', (e) => {
       if (this.isOpen && !this.editor.contains(e.target as Node) && !(e.target as HTMLElement).classList?.contains('editable')) this.close();
     });
+  }
+
+  /** Example words offered as one-tap chips (typing stays available). */
+  setSuggestions(words: string[]) {
+    this.suggestions = words;
+  }
+
+  /** Words the player already got the world to accept, offered again as chips. */
+  rememberWord(raw: string) {
+    const w = raw.trim().toLowerCase();
+    if (!w) return;
+    this.recent = [w, ...this.recent.filter((r) => r !== w)].slice(0, MAX_CHIPS);
+  }
+
+  private renderChips() {
+    const words: string[] = [];
+    for (const w of [...this.suggestions, ...this.recent]) {
+      const l = w.toLowerCase();
+      if (!words.includes(l)) words.push(l);
+    }
+    this.chips.innerHTML = '';
+    this.chips.hidden = words.length === 0;
+    for (const w of words.slice(0, MAX_CHIPS)) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chip';
+      b.textContent = w.toUpperCase();
+      b.addEventListener('click', () => { this.input.value = w; void this.submit(); });
+      this.chips.appendChild(b);
+    }
+  }
+
+  private get sheetMode() {
+    return window.innerWidth <= SHEET_MAX_WIDTH;
   }
 
   render(rules: RuleDefinition[], editableIndex: number, animate = false) {
@@ -46,7 +94,7 @@ export class RuleEditor {
         span.textContent = t.text;
         if (t.editable) {
           span.id = 'editable-word';
-          span.title = 'Click to rewrite this word';
+          span.title = 'Tap to rewrite this word';
           span.addEventListener('click', () => this.open());
           if (animate) span.classList.add('pop');
         }
@@ -70,7 +118,7 @@ export class RuleEditor {
 
   setTutorial(stage: 'click' | 'type' | null) {
     this.tip.hidden = stage !== 'click';
-    this.tip.textContent = 'CLICK THIS WORD';
+    this.tip.textContent = isTouch() ? 'TAP THIS WORD' : 'CLICK THIS WORD';
     this.input.placeholder = stage === 'type' ? 'TYPE A NEW WORD' : 'type one word';
     this.positionTip();
   }
@@ -86,7 +134,9 @@ export class RuleEditor {
     this.msg.textContent = '';
     this.msg.className = '';
     this.hint.textContent = '';
+    this.renderChips();
     this.editor.hidden = false;
+    document.body.classList.add('editing-word');
     this.position();
     this.input.focus();
     this.onOpen();
@@ -96,6 +146,7 @@ export class RuleEditor {
     if (!this.isOpen) return;
     this.isOpen = false;
     this.editor.hidden = true;
+    document.body.classList.remove('editing-word');
     document.getElementById('editable-word')?.classList.remove('editing');
     this.input.blur();
   }
@@ -103,11 +154,21 @@ export class RuleEditor {
   private position() {
     const word = document.getElementById('editable-word');
     if (!word || this.editor.hidden) return;
+    const s = this.editor.style;
+    if (this.sheetMode) {
+      // Dock to the bottom of whatever the keyboard leaves visible.
+      this.editor.classList.add('sheet');
+      s.left = ''; s.top = '';
+      s.bottom = `${keyboardInset()}px`;
+      return;
+    }
+    this.editor.classList.remove('sheet');
+    s.bottom = '';
     const r = word.getBoundingClientRect();
     const w = this.editor.offsetWidth;
     const left = Math.max(16, Math.min(window.innerWidth - w - 16, r.left + r.width / 2 - w / 2));
-    this.editor.style.left = `${left}px`;
-    this.editor.style.top = `${r.bottom + 12}px`;
+    s.left = `${left}px`;
+    s.top = `${r.bottom + 12}px`;
   }
 
   private positionTip() {

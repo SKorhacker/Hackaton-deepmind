@@ -2,7 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#14121c" />
   <title>ONE WORD</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -17,7 +21,16 @@
       <div id="tutorial-tip" hidden>CLICK THIS WORD</div>
     </header>
 
-    <main id="game"></main>
+    <main id="game">
+      <div id="ai-note"></div>
+      <div id="pad" hidden>
+        <button class="pad-btn" data-dir="up" aria-label="move up">▲</button>
+        <button class="pad-btn" data-dir="left" aria-label="move left">◀</button>
+        <button class="pad-btn" data-dir="wait" aria-label="wait a turn">•</button>
+        <button class="pad-btn" data-dir="right" aria-label="move right">▶</button>
+        <button class="pad-btn" data-dir="down" aria-label="move down">▼</button>
+      </div>
+    </main>
 
     <footer id="statusbar">
       <span id="level-name"></span>
@@ -26,15 +39,19 @@
       <span class="stat">DEATHS <b id="stat-deaths">0</b></span>
       <span class="spacer"></span>
       <span class="keys">WASD / ARROWS move · SPACE wait</span>
+      <button id="btn-pad" class="ghost icon" title="Toggle the on-screen pad" aria-label="toggle on-screen pad">✛</button>
+      <button id="btn-fullscreen" class="ghost icon" title="Fullscreen" aria-label="fullscreen">⛶</button>
       <button id="btn-menu" class="ghost">MENU</button>
-      <button id="btn-restart">↻ RESTART <kbd>R</kbd></button>
+      <button id="btn-restart">↻ <span class="btn-label">RESTART</span><kbd>R</kbd></button>
     </footer>
   </div>
 
   <div id="editor" class="panel" hidden>
     <div class="editor-title">Replace <span id="editor-old"></span> with:</div>
     <form id="editor-form" autocomplete="off">
-      <input id="editor-input" type="text" maxlength="24" spellcheck="false" placeholder="type one word" />
+      <input id="editor-input" type="text" maxlength="24" spellcheck="false" autocapitalize="off"
+             autocorrect="off" autocomplete="off" enterkeyhint="go" placeholder="type one word" />
+      <div id="editor-chips"></div>
       <div class="editor-buttons">
         <button type="submit" id="editor-apply">APPLY</button>
         <button type="button" id="editor-cancel" class="ghost">CANCEL</button>
