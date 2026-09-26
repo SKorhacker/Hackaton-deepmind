@@ -31,7 +31,8 @@ export type WorldEvent =
   | { type: 'key'; x: number; y: number }
   | { type: 'door'; open: boolean; x: number; y: number }
   | { type: 'guard'; id: number; x: number; y: number }
-  | { type: 'guardDeath' | 'guardBounce'; id: number; x: number; y: number }
+  | { type: 'slide' | 'teleport' | 'pushed' | 'swap'; x: number; y: number }
+  | { type: 'guardDeath' | 'guardBounce' | 'guardSlide' | 'guardTeleport'; id: number; x: number; y: number }
   | { type: 'guardFreeze'; id: number; turns: number };
 
 export interface GuardIntent {
@@ -131,12 +132,33 @@ export class World {
     } else if (dir) {
       const nx = p.x + dir.x, ny = p.y + dir.y;
       const g = this.guardAt(nx, ny);
-      if (g && this.guardIntent(g).lethal) return this.kill('guard', ev);
-      if (!this.playerCanEnter(nx, ny)) return [{ type: 'bump' }];
-      p.x = nx; p.y = ny;
-      ev.push({ type: 'move', x: nx, y: ny });
-      this.onEnterTile(dir, ev);
-      if (s.dead) return ev;
+      if (g && this.youSwap()) {
+        // "YOU SWAP GUARD": walking into a guard trades places with it.
+        g.x = p.x; g.y = p.y;
+        p.x = nx; p.y = ny;
+        ev.push({ type: 'swap', x: nx, y: ny }, { type: 'guard', id: g.id, x: g.x, y: g.y });
+        this.onGuardEnter(g, { x: -dir.x, y: -dir.y }, ev);
+        this.onEnterTile(dir, ev);
+        if (s.dead) return ev;
+      } else if (g && this.youPush()) {
+        // "YOU PUSH GUARD": walking into a guard shoves it one tile (Sokoban-style).
+        const gx = g.x + dir.x, gy = g.y + dir.y;
+        if (!this.guardCanOccupy(g, gx, gy)) return [{ type: 'bump' }];
+        g.x = gx; g.y = gy;
+        ev.push({ type: 'guard', id: g.id, x: gx, y: gy });
+        this.onGuardEnter(g, dir, ev);
+        p.x = nx; p.y = ny;
+        ev.push({ type: 'move', x: nx, y: ny });
+        this.onEnterTile(dir, ev);
+        if (s.dead) return ev;
+      } else {
+        if (g && this.guardIntent(g).lethal) return this.kill('guard', ev);
+        if (!this.playerCanEnter(nx, ny)) return [{ type: 'bump' }];
+        p.x = nx; p.y = ny;
+        ev.push({ type: 'move', x: nx, y: ny });
+        this.onEnterTile(dir, ev);
+        if (s.dead) return ev;
+      }
     } else {
       ev.push({ type: 'wait' });
     }
@@ -148,6 +170,7 @@ export class World {
     if (this.checkCaught(ev)) return ev;
 
     this.guardsAct(ev, prev);
+    if (s.dead || s.won) return ev;
     this.pickupKeys(ev);
     this.updateDoors(ev);
     this.checkCaught(ev);
@@ -164,13 +187,34 @@ export class World {
 
   private onEnterTile(dir: Pos, ev: WorldEvent[]) {
     const p = this.s.player;
-    for (let hops = 0; hops < 8; hops++) {
+    let sliding = false;
+    for (let hops = 0; hops < 60; hops++) {
       const verb = this.youVerbOn(this.tile(p.x, p.y));
+      // SLIDE: once on a slide tile, keep going until something stops you.
+      if (verb === 'SLIDE') sliding = true;
+      if (sliding && !isDeadly(verb)) {
+        const nx = p.x + dir.x, ny = p.y + dir.y;
+        if (this.playerCanEnter(nx, ny)) {
+          p.x = nx; p.y = ny;
+          ev.push({ type: 'slide', x: nx, y: ny });
+          continue;
+        }
+        sliding = false;
+        if (verb === 'SLIDE') return;
+      }
       switch (verb) {
         case 'DIE':
         case 'ATTACK':
           this.kill('red', ev);
           return;
+        case 'TELEPORT': {
+          const to = this.teleportTarget(p);
+          if (to && this.playerCanEnter(to.x, to.y)) {
+            p.x = to.x; p.y = to.y;
+            ev.push({ type: 'teleport', x: to.x, y: to.y });
+          }
+          return;
+        }
         case 'BOUNCE': {
           const nx = p.x + dir.x, ny = p.y + dir.y;
           if (!this.playerCanEnter(nx, ny)) return;
@@ -238,11 +282,60 @@ export class World {
     ev.push({ type: 'guardDeath', id: g.id, x: g.x, y: g.y });
   }
 
+  /** Where a teleport tile sends you: the next tile of the same colour, in reading order. */
+  private teleportTarget(from: Pos): Pos | null {
+    const t = this.tile(from.x, from.y);
+    const all: Pos[] = [];
+    for (let y = 0; y < this.level.height; y++)
+      for (let x = 0; x < this.level.width; x++)
+        if (this.level.tiles[y][x] === t) all.push({ x, y });
+    if (all.length < 2) return null;
+    const i = all.findIndex((q) => q.x === from.x && q.y === from.y);
+    return all[(i + 1) % all.length];
+  }
+
+  /** Can a guard physically be moved onto this tile (sliding, teleporting)? Unlike pathing, ignores danger. */
+  private guardCanOccupy(g: GuardState, x: number, y: number) {
+    const p = this.s.player;
+    return !this.isBlocking(x, y) && !(p.x === x && p.y === y) && !this.s.guards.some((o) => o !== g && o.x === x && o.y === y);
+  }
+
+  /** "YOU PUSH GUARD": walking into a guard shoves it. */
+  youPush() {
+    return this.rules.some((r) => r.subject === 'YOU' && r.verb === 'PUSH' && !r.condition && (!r.object || r.object === 'GUARD' || r.object === 'EVERYONE'));
+  }
+
+  /** "YOU SWAP GUARD": walking into a guard swaps places with it. */
+  youSwap() {
+    return this.rules.some((r) => r.subject === 'YOU' && r.verb === 'SWAP' && !r.condition && (!r.object || r.object === 'GUARD' || r.object === 'EVERYONE'));
+  }
+
   /** Tile effects for a guard that just stepped in direction `dir`. */
   private onGuardEnter(g: GuardState, dir: Pos, ev: WorldEvent[]) {
-    for (let hops = 0; hops < 8; hops++) {
+    let sliding = false;
+    for (let hops = 0; hops < 60; hops++) {
       const verb = this.verbOn('GUARD', this.tile(g.x, g.y));
       if (isDeadly(verb)) { this.killGuard(g, ev); return; }
+      if (verb === 'SLIDE') sliding = true;
+      if (sliding) {
+        const nx = g.x + dir.x, ny = g.y + dir.y;
+        if (this.guardCanOccupy(g, nx, ny)) {
+          g.x = nx; g.y = ny;
+          ev.push({ type: 'guardSlide', id: g.id, x: nx, y: ny });
+          continue;
+        }
+        sliding = false;
+        if (verb === 'SLIDE') return;
+      }
+      if (verb === 'TELEPORT') {
+        const to = this.teleportTarget(g);
+        if (to && this.guardCanOccupy(g, to.x, to.y)) {
+          g.x = to.x; g.y = to.y;
+          ev.push({ type: 'guardTeleport', id: g.id, x: to.x, y: to.y });
+          if (isDeadly(this.verbOn('GUARD', this.tile(g.x, g.y)))) this.killGuard(g, ev);
+        }
+        return;
+      }
       if (verb === 'FREEZE' || verb === 'SLEEP') {
         g.frozen = verb === 'SLEEP' ? 3 : 2;
         ev.push({ type: 'guardFreeze', id: g.id, turns: g.frozen });
@@ -313,9 +406,10 @@ export class World {
     switch (verb) {
       case 'CHASE':
       case 'ATTACK':
+      case 'PUSH':
       case 'FOLLOW': {
         const goal = this.nounGoal(object, g);
-        const lethal = verb !== 'FOLLOW' && object === 'YOU' && !hidden;
+        const lethal = (verb === 'CHASE' || verb === 'ATTACK') && object === 'YOU' && !hidden;
         if (!goal || goal(g.x, g.y)) return { ...idle, lethal };
         // Following you: once attached, step into the tile you just left.
         const p = this.s.player;
@@ -387,14 +481,35 @@ export class World {
     return bfsPath(g, (x, y) => x === bx && y === by, pass, W, H);
   }
 
+  private pushPlayer(g: GuardState, d: Pos, ev: WorldEvent[]) {
+    const p = this.s.player;
+    const tx = p.x + d.x, ty = p.y + d.y;
+    if (!this.playerCanEnter(tx, ty)) return;
+    g.x = p.x; g.y = p.y;
+    p.x = tx; p.y = ty;
+    ev.push({ type: 'pushed', x: tx, y: ty }, { type: 'guard', id: g.id, x: g.x, y: g.y });
+    this.onEnterTile(d, ev);
+    if (this.s.dead) return;
+    this.updateHidden(ev);
+    this.pickupKeys(ev);
+    this.updateDoors(ev);
+    if (this.tile(p.x, p.y) === T.EXIT) { this.s.won = true; ev.push({ type: 'win' }); }
+  }
+
   private guardsAct(ev: WorldEvent[], prevPlayer: Pos) {
     for (const g of [...this.s.guards]) {
       if (g.frozen > 0) { g.frozen--; continue; }
       const intent = this.guardIntent(g, prevPlayer);
       if (!intent.path.length) continue;
       const next = intent.path[0];
-      // Never step onto the player; lethal guards catch from an adjacent tile instead.
-      if (next.x === this.s.player.x && next.y === this.s.player.y) continue;
+      const p = this.s.player;
+      if (next.x === p.x && next.y === p.y) {
+        // "GUARD PUSHES YOU": shove the player one tile and step into their place.
+        if (intent.verb === 'PUSH') this.pushPlayer(g, { x: next.x - g.x, y: next.y - g.y }, ev);
+        if (this.s.dead || this.s.won) return;
+        // Otherwise never step onto the player; lethal guards catch from an adjacent tile instead.
+        continue;
+      }
       const dir = { x: next.x - g.x, y: next.y - g.y };
       g.x = next.x; g.y = next.y;
       ev.push({ type: 'guard', id: g.id, x: g.x, y: g.y });

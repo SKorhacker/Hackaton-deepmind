@@ -25,6 +25,7 @@ let wordbook: WordBook;
 // What a tile looks like under the current rule.
 const TILE_GLYPH: Partial<Record<Mechanic, string>> = {
   DIE: '✕', ATTACK: '✕', HIDE: '◌', HEAL: '✚', BOUNCE: '⇡', FREEZE: '❄', SLEEP: 'z',
+  SLIDE: '≋', TELEPORT: '◎',
 };
 
 const GUARD_STYLE: Record<string, { color: number; icon: string }> = {
@@ -35,6 +36,7 @@ const GUARD_STYLE: Record<string, { color: number; icon: string }> = {
   FLEE: { color: 0xffd166, icon: '?!' },
   SLEEP: { color: 0x7c7896, icon: 'z' },
   FREEZE: { color: 0x9fdcff, icon: '❄' },
+  PUSH: { color: 0xc58cff, icon: '»' },
 };
 const guardStyle = (v: string) => GUARD_STYLE[v] ?? { color: COLORS.guard, icon: '·' };
 
@@ -370,7 +372,9 @@ export class GameScene extends Phaser.Scene {
     this.locked = true;
     this.time.delayedCall(125, () => { this.locked = false; });
     const hops: Pos[] = [];
-    for (const e of ev) if (e.type === 'move' || e.type === 'bounce') hops.push({ x: e.x, y: e.y });
+    for (const e of ev) {
+      if (e.type === 'move' || e.type === 'bounce' || e.type === 'slide' || e.type === 'teleport' || e.type === 'pushed' || e.type === 'swap') hops.push({ x: e.x, y: e.y });
+    }
     this.effects(ev);
     this.sync(true, hops);
     if (this.world.s.dead) this.onDeath();
@@ -382,6 +386,12 @@ export class GameScene extends Phaser.Scene {
       switch (e.type) {
         case 'move': sfx.move(); break;
         case 'bounce': sfx.bounce(); this.burst(e.x, e.y, COLORS.red, 8); break;
+        case 'slide': this.burst(e.x, e.y, COLORS.ice, 3); break;
+        case 'teleport': sfx.teleport(); this.burst(e.x, e.y, COLORS.blue, 16, true); break;
+        case 'pushed': sfx.push(); this.burst(e.x, e.y, 0xc58cff, 8); this.floatText(e, 'SHOVED!', '#c58cff'); break;
+        case 'swap': sfx.teleport(); this.burst(e.x, e.y, 0xc58cff, 12); this.floatText(e, 'SWAP!', '#c58cff'); break;
+        case 'guardSlide': this.burst(e.x, e.y, COLORS.ice, 3); break;
+        case 'guardTeleport': sfx.teleport(); this.burst(e.x, e.y, COLORS.blue, 12, true); break;
         case 'hide': sfx.hide(); this.floatText(this.world.s.player, 'HIDDEN', '#b9b4cc'); break;
         case 'heal': sfx.heal(); this.burst(this.world.s.player.x, this.world.s.player.y, COLORS.heal, 12, true); break;
         case 'freeze': sfx.freeze(); this.burst(this.world.s.player.x, this.world.s.player.y, COLORS.ice, 10); break;
